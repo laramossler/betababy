@@ -13,8 +13,10 @@ const { C, F, ME, CONCIERGE, CIRCLE, VIBES } = window.LEDGER;
 const { Mono, Rule, SC, Tag, Ini, Btn, Imagery, Dot, Divider, PetTag } = window.ATOMS;
 const { useState, useEffect, useRef } = React;
 
-// 15 indices: 0 Arrival, 1 Frame, 2..13 counted (12 steps), 14 Welcome
-const COUNTED = 12;
+// 9 indices: 0 Arrival, 1 Frame, 2..7 counted (6 steps), 8 Welcome
+// The rest (permissions, circle, companions, desk, kit, places) live as components
+// but are surfaced as LATER PROMPTS on the dashboard, not in this first sitting.
+const COUNTED = 6;
 
 const ADDRESS_BOOK = [
   { id: "sophia", name: "Sophia Reyes",      city: "Los Angeles", initial: "S", color: "#8E9E82", signal: "texts you weekly",    suggested: true },
@@ -27,20 +29,25 @@ const ADDRESS_BOOK = [
   { id: "petra",  name: "Petra Lindqvist",   city: "Stockholm",   initial: "P", color: "#7A9BA0", signal: "calls infrequent" },
 ];
 
-// The thirteen beats — shown on the Frame screen
+// The six beats — a SHORT first sitting. Everything else is a later prompt.
 const RITUAL = [
-  { n: "01", title: "Meet Margaux",         sub: "Your concierge — and what she's done today" },
-  { n: "02", title: "Your name",            sub: "Given, family, mother tongue" },
-  { n: "03", title: "Your cities",          sub: "Wherever you keep a bag" },
-  { n: "04", title: "The year ahead",       sub: "Starting with Rome — sketchy is fine" },
-  { n: "05", title: "Permissions",          sub: "Contacts + calendar, read-only" },
-  { n: "06", title: "Your circle",          sub: "The four or five she should know" },
-  { n: "07", title: "Travelling with",      sub: "Pets, partner, anyone else" },
-  { n: "08", title: "The desk",             sub: "Quiet hours, channels, tier" },
-  { n: "09", title: "The kit",              sub: "Passport, dietary, emergency" },
-  { n: "10", title: "Your tones",           sub: "What a good year feels like" },
-  { n: "11", title: "Places worth keeping", sub: "Recommendations + memories" },
-  { n: "12", title: "One first word",       sub: "A voice note Margaux keeps" },
+  { n: "01", title: "Meet Margaux",     sub: "Your concierge — and what she's done today" },
+  { n: "02", title: "Your name",        sub: "Given, family, mother tongue" },
+  { n: "03", title: "Your cities",      sub: "Wherever you keep a bag" },
+  { n: "04", title: "The year ahead",   sub: "Starting with Rome" },
+  { n: "05", title: "Your tones",       sub: "What a good year feels like" },
+  { n: "06", title: "One first word",   sub: "A voice note Margaux keeps" },
+];
+
+// Components below this comment are NOT in the linear flow —
+// they are kept for surfacing as later prompts from the dashboard.
+const LATER_PROMPTS = [
+  { id: "permissions", title: "Address book + calendar",   when: "When she next plans with friends" },
+  { id: "circle",      title: "Your circle",                when: "After Margaux drafts Rome" },
+  { id: "companions",  title: "Travelling with",            when: "Before any trip with a pet or guest" },
+  { id: "desk",        title: "The desk · quiet hours",     when: "Once Margaux starts to reach out" },
+  { id: "kit",         title: "The kit · passport, dietary", when: "When booking the first flight" },
+  { id: "places",      title: "Places worth keeping",       when: "Anytime, from the Memory Ledger" },
 ];
 
 const COMPANION_KINDS = {
@@ -65,7 +72,7 @@ function Counter({ step }) {
   const display = step - 1; // step 2 → 01
   if (display < 1 || display > COUNTED) return <span />;
   return (
-    <p style={{ fontFamily: F.mono, fontSize: 9, color: C.stone, letterSpacing: 1 }}>
+    <p style={{ fontFamily: F.mono, fontSize: 9, color: C.stone, letterSpacing: 1, whiteSpace: "nowrap" }}>
       {String(display).padStart(2, "0")} <span style={{ color: C.borderLight }}>/</span> {String(COUNTED).padStart(2, "0")}
     </p>
   );
@@ -191,9 +198,9 @@ function Arrival({ next }) {
 function Frame({ next, back }) {
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: "56px 26px 40px" }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18, animation: "rise 0.6s ease" }}>
-        <div>
-          <SC color={C.gold} size={9}>Founder of your Ledger</SC>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18, animation: "rise 0.6s ease", gap: 12 }}>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <SC color={C.gold} size={8.5} style={{ whiteSpace: "nowrap" }}>Founder · Your Ledger</SC>
           <p style={{ fontFamily: F.display, fontSize: 24, color: C.cream, fontWeight: 400, fontStyle: "italic", marginTop: 6, lineHeight: 1 }}>Book № 001</p>
         </div>
         <div style={{ width: 46, height: 46, borderRadius: "50%", border: `0.5px solid ${C.gold}80`, display: "flex", alignItems: "center", justifyContent: "center", position: "relative", background: `radial-gradient(circle at 35% 30%, ${C.gold}30, ${C.gold}10 50%, transparent 70%)` }}>
@@ -202,11 +209,11 @@ function Frame({ next, back }) {
         </div>
       </div>
 
-      <h1 style={{ fontFamily: F.display, fontSize: 25, color: C.cream, fontWeight: 400, fontStyle: "italic", lineHeight: 1.15, marginTop: 4, marginBottom: 12, animation: "rise 0.7s ease" }}>
+      <h1 style={{ fontFamily: F.display, fontSize: 26, color: C.cream, fontWeight: 400, fontStyle: "italic", lineHeight: 1.15, marginTop: 4, marginBottom: 12, animation: "rise 0.7s ease" }}>
         This book is yours.<br/>Margaux is mine to share.
       </h1>
       <p style={{ fontFamily: F.body, fontSize: 13.5, color: C.creamSoft, fontStyle: "italic", lineHeight: 1.65, fontWeight: 300, marginBottom: 18, animation: "rise 0.8s ease" }}>
-        A first sitting. The early steps are the ones I'll keep most carefully — the rest you can return to as you live.
+        Six small moves to start. The rest — your circle, the address book, the practical kit — we'll come back to as you live.
       </p>
 
       <Rule w="44px" m="0 0 14px 0" />
@@ -217,18 +224,34 @@ function Frame({ next, back }) {
           return (
             <div key={r.n} style={{
               display: "flex", alignItems: "baseline", gap: 12,
-              padding: "6px 0",
+              padding: "8px 0",
               borderBottom: i === RITUAL.length - 1 ? "none" : `0.5px solid ${C.border}`,
-              animation: `rise 0.4s ease ${0.025 * i + 0.3}s both`,
+              animation: `rise 0.4s ease ${0.04 * i + 0.3}s both`,
             }}>
               <span style={{ fontFamily: F.mono, fontSize: 9, color: accent, letterSpacing: 1, width: 18 }}>{r.n}</span>
               <div style={{ flex: 1 }}>
-                <p style={{ fontFamily: F.display, fontSize: 13, color: r.n === "04" ? C.gold : C.cream, fontWeight: 500 }}>{r.title}</p>
-                <p style={{ fontFamily: F.body, fontSize: 10.5, color: C.stone, fontStyle: "italic", marginTop: 0, fontWeight: 300 }}>{r.sub}</p>
+                <p style={{ fontFamily: F.display, fontSize: 14, color: r.n === "04" ? C.gold : C.cream, fontWeight: 500 }}>{r.title}</p>
+                <p style={{ fontFamily: F.body, fontSize: 11, color: C.stone, fontStyle: "italic", marginTop: 1, fontWeight: 300 }}>{r.sub}</p>
               </div>
             </div>
           );
         })}
+      </div>
+
+      {/* Later prompts — set the expectation that more comes naturally */}
+      <div style={{ marginTop: 16, padding: "12px 14px", border: `0.5px solid ${C.border}`, background: C.card, borderLeft: `1.5px solid ${C.blush}`, animation: "rise 0.5s ease 0.6s both" }}>
+        <SC color={C.blush} size={7.5} style={{ marginBottom: 10 }}>Later, when it's useful</SC>
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          {LATER_PROMPTS.map(p => (
+            <div key={p.id} style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
+              <Dot color={C.blush} s={3} />
+              <p style={{ fontFamily: F.body, fontSize: 11.5, color: C.creamSoft, fontStyle: "italic", fontWeight: 300, lineHeight: 1.5 }}>{p.title}</p>
+            </div>
+          ))}
+        </div>
+        <p style={{ fontFamily: F.body, fontSize: 10.5, color: C.stone, fontStyle: "italic", marginTop: 10, fontWeight: 300, lineHeight: 1.45 }}>
+          Margaux will ask for each when it actually matters. Nothing is hidden — just patient.
+        </p>
       </div>
 
       <p style={{ fontFamily: F.body, fontSize: 12, color: C.stone, fontStyle: "italic", lineHeight: 1.5, fontWeight: 300, marginTop: 16, textAlign: "center" }}>
@@ -275,9 +298,9 @@ function MargauxStep({ next }) {
         </h1>
 
         {/* Live presence chip */}
-        <div style={{ display: "inline-flex", alignItems: "center", gap: 7, marginTop: 8, padding: "3px 10px 3px 8px", border: `0.5px solid ${C.sage}50`, background: `${C.sage}08` }}>
+        <div style={{ display: "inline-flex", alignItems: "center", gap: 7, marginTop: 8, padding: "3px 10px 3px 8px", border: `0.5px solid ${C.sage}50`, background: `${C.sage}08`, whiteSpace: "nowrap" }}>
           <Dot color={C.sage} s={5} glow />
-          <span style={{ fontFamily: F.sans, fontSize: 8.5, color: C.sage, letterSpacing: 2, textTransform: "uppercase" }}>at her desk · 14h22 cet</span>
+          <span style={{ fontFamily: F.sans, fontSize: 8, color: C.sage, letterSpacing: 1.8, textTransform: "uppercase" }}>at her desk · 14h22 cet</span>
         </div>
 
         <div style={{ marginTop: 18, padding: "16px 16px", border: `0.5px solid ${C.border}`, background: `${C.blush}05`, borderLeft: `1.5px solid ${C.blush}`, textAlign: "left", width: "100%" }}>
@@ -1251,11 +1274,11 @@ function Onboarding({ onDone }) {
     firstWord: "",
   });
   const set = (patch) => setState(s => ({ ...s, ...patch }));
-  const TOTAL = 15; // 0..14
+  const TOTAL = 9; // 0..8
   const next = () => step < TOTAL - 1 ? setStep(s => s + 1) : onDone(state);
   const back = () => step > 0 ? setStep(s => s - 1) : null;
 
-  const showBar = step >= 2 && step <= 13;
+  const showBar = step >= 2 && step <= 7;
 
   return (
     <div key={step} style={{ height: "100%", background: C.bg, display: "flex", flexDirection: "column", color: C.cream, animation: "fadeIn 0.5s ease" }}>
@@ -1279,15 +1302,9 @@ function Onboarding({ onDone }) {
         {step === 3  && <NameStep next={next} state={state} set={set} />}
         {step === 4  && <CitiesStep next={next} state={state} set={set} />}
         {step === 5  && <YearAheadStep next={next} state={state} set={set} />}
-        {step === 6  && <PermissionsStep next={next} state={state} set={set} />}
-        {step === 7  && <CircleStep next={next} state={state} set={set} />}
-        {step === 8  && <CompanionsStep next={next} state={state} set={set} />}
-        {step === 9  && <DeskStep next={next} state={state} set={set} />}
-        {step === 10 && <KitStep next={next} state={state} set={set} />}
-        {step === 11 && <TonesStep next={next} state={state} set={set} />}
-        {step === 12 && <PlacesStep next={next} state={state} set={set} />}
-        {step === 13 && <FirstWordStep next={next} state={state} set={set} />}
-        {step === 14 && <Welcome done={() => onDone(state)} state={state} />}
+        {step === 6  && <TonesStep next={next} state={state} set={set} />}
+        {step === 7  && <FirstWordStep next={next} state={state} set={set} />}
+        {step === 8  && <Welcome done={() => onDone(state)} state={state} />}
       </div>
     </div>
   );

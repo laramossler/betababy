@@ -5,7 +5,7 @@ const { Home, TripDetail } = window.SCREENS_A;
 const { Concierge, BlackBook, Memory, Gatherings } = window.SCREENS_B;
 const { CreateFlow } = window.SCREENS_CREATE;
 const { Onboarding } = window.ONBOARDING;
-const { useState, useEffect } = React;
+const { useState } = React;
 
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
   "palette": "midnight",
@@ -23,35 +23,44 @@ const PALETTES = {
 
 const STORAGE_KEY = "ledger.profile.v1";
 
-// Read persisted profile (if any) before first render so the main app
-// reflects who Chloe said she was the moment it opens.
+// Snapshots of the seed data taken at module load so applyProfile can be
+// re-run idempotently (overwrite, not append, when re-applying on reload).
+const SEED_TRIPS = window.LEDGER.TRIPS.slice();
+const SEED_THREAD = window.LEDGER.CONCIERGE_THREAD.slice();
+const SEED_ME = JSON.parse(JSON.stringify(window.LEDGER.ME));
+
 function loadProfile() {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw);
-  } catch (e) {
-    return null;
-  }
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) { return null; }
 }
-
 function persistProfile(profile) {
-  try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(profile));
-  } catch (e) {
-    // ignore quota errors — onboarding state is recoverable
-  }
+  try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(profile)); } catch (e) {}
 }
-
 function clearProfile() {
   try { window.localStorage.removeItem(STORAGE_KEY); } catch (e) {}
 }
 
-// Apply collected onboarding state into the live data so every screen
-// reads "Chloe" (or whoever) consistently. Mutates window.LEDGER in place
-// because components captured the object reference at module load.
+function slugify(s) {
+  return String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/(^_|_$)/g, "") || "trip";
+}
+
+// Apply collected onboarding state into the live data so every screen reads
+// the user's actual identity and sees the trips Margaux is drafting for them.
+// Mutates window.LEDGER objects/arrays in place — components captured those
+// references at module load.
 function applyProfile(profile) {
+  // Reset to seed first so re-applying (e.g. after a reload) doesn't compound.
+  Object.keys(window.LEDGER.ME).forEach(k => delete window.LEDGER.ME[k]);
+  Object.assign(window.LEDGER.ME, JSON.parse(JSON.stringify(SEED_ME)));
+  window.LEDGER.TRIPS.length = 0;
+  window.LEDGER.TRIPS.push(...SEED_TRIPS);
+  window.LEDGER.CONCIERGE_THREAD.length = 0;
+  window.LEDGER.CONCIERGE_THREAD.push(...SEED_THREAD);
+
   if (!profile) return;
+
   const me = window.LEDGER.ME;
   if (profile.firstName) {
     me.name = profile.firstName;
@@ -68,40 +77,89 @@ function applyProfile(profile) {
   if (firstPet) {
     me.pet = {
       name: firstPet.name,
-      breed: firstPet.fields?.breed || me.pet?.breed || "",
-      weight: firstPet.fields?.weight || me.pet?.weight || "",
-      emoji: me.pet?.emoji || "🐕",
+      breed: firstPet.fields?.breed || "",
+      weight: firstPet.fields?.weight || "",
+      emoji: "🐕",
     };
-  } else if (profile.companions && profile.companions.every(c => c.kind !== "pet")) {
-    // She removed every pet — keep ME.pet but mark it absent.
-    me.pet = null;
   }
 
+  if (profile.tones) me.tones = profile.tones.slice();
   window.LEDGER.PROFILE = profile;
+
+  // Year ahead → drafting trips, prepended so the lead (Rome) is at the top.
+  const yearAhead = (profile.yearAhead || []).filter(t => t.destination && t.destination.trim());
+  const newTrips = yearAhead.map(t => {
+    const lead = !!t.lead;
+    return {
+      id: `ya_${slugify(t.month)}_${slugify(t.destination)}`,
+      title: t.destination,
+      sub: lead ? "Margaux is drafting" : (t.role || "Sketched"),
+      dates: t.dates || `${t.month} 2026`,
+      daysOut: 0,
+      cover: lead ? "#9A8460" : "#5A5042",
+      coverGrad: lead
+        ? "linear-gradient(135deg, #2A1815 0%, #6A4F3A 50%, #B8A07A 100%)"
+        : "linear-gradient(135deg, #1F1815 0%, #3A3530 60%, #7A6D54 100%)",
+      status: "drafting",
+      role: t.role && /guest/i.test(t.role) ? "guest" : "host",
+      guests: ["chloe"],
+      note: t.why || (lead ? "First pass in 48 hours — villas, the table, the chef." : "Sketched. Margaux is on it."),
+    };
+  });
+  if (newTrips.length) window.LEDGER.TRIPS.unshift(...newTrips);
+
+  // Margaux thread: replace the legacy demo conversation with a real first
+  // exchange seeded from the user's first word + Rome (or graceful fallback).
+  const thread = window.LEDGER.CONCIERGE_THREAD;
+  thread.length = 0;
+  const lead = yearAhead.find(t => t.lead) || yearAhead[0];
+  thread.push({
+    from: "margaux",
+    time: "Today, just now",
+    body: `Hello${profile.firstName ? `, ${profile.firstName}` : ""}. I'm at the desk. Tell me when something's on your mind — I'll keep what matters and forget the rest.`,
+  });
+  if (profile.firstWord && profile.firstWord.trim()) {
+    thread.push({ from: "me", time: "Today, just now", body: profile.firstWord.trim() });
+  }
+  if (lead) {
+    thread.push({
+      from: "margaux",
+      time: "Today, just now",
+      body: `Noted. First pass on ${lead.destination}${lead.dates ? ` (${lead.dates})` : ""} in 48 hours — villas, the table, the chef. I'll write properly when I have something worth sharing.`,
+    });
+  } else {
+    thread.push({
+      from: "margaux",
+      time: "Today, just now",
+      body: "I've enough to start with. Three places I think you'd love based on your tones — I'll write Friday.",
+    });
+  }
 }
+
+// Apply any persisted profile BEFORE React first renders so the main app
+// reflects who she said she was the moment it opens.
+const SAVED_PROFILE = loadProfile();
+if (SAVED_PROFILE) applyProfile(SAVED_PROFILE);
 
 function App() {
   const [screen, setScreen] = useState("home");
-  const [tripId, setTripId] = useState("riviera");
+  const [tripId, setTripId] = useState(window.LEDGER.TRIPS[0]?.id || "riviera");
   const [plan, setPlan] = useState(window.LEDGER.WEEK);
   const [t, setTweak] = window.useTweaks ? window.useTweaks(TWEAK_DEFAULTS) : [TWEAK_DEFAULTS, () => {}];
   const pal = PALETTES[t.palette] || PALETTES.midnight;
-
-  // Onboarding gate — load any saved profile synchronously so we don't flash
-  // the main app on reload for an already-onboarded user.
-  const initialProfile = loadProfile();
-  if (initialProfile) applyProfile(initialProfile);
-  const [onboarded, setOnboarded] = useState(!!initialProfile);
+  const [onboarded, setOnboarded] = useState(!!SAVED_PROFILE);
 
   const completeOnboarding = (profileState) => {
     applyProfile(profileState);
     persistProfile(profileState);
+    setTripId(window.LEDGER.TRIPS[0]?.id || "riviera");
     setOnboarded(true);
     setScreen("home");
   };
 
   const replayOnboarding = () => {
     clearProfile();
+    applyProfile(null); // restore seed
     setOnboarded(false);
   };
 
@@ -137,17 +195,15 @@ function App() {
             {current}
           </div>
 
-          {/* Create-flow overlay */}
           {inCreate && (
             <div style={{ position: "absolute", inset: 0, background: pal.bg, zIndex: 100, animation: "fadeIn 0.3s ease" }}>
               <CreateFlow
                 onClose={() => setScreen("home")}
-                onLaunched={() => { setTripId("riviera"); setScreen("trip"); }}
+                onLaunched={() => { setTripId(window.LEDGER.TRIPS[0]?.id || "riviera"); setScreen("trip"); }}
               />
             </div>
           )}
 
-          {/* Bottom nav — floating glass strip */}
           {!inCreate && <div style={{
             position: "absolute", bottom: 0, left: 0, right: 0,
             background: `${pal.bg}E8`, backdropFilter: "blur(18px)",
@@ -176,7 +232,6 @@ function App() {
         </React.Fragment>
       )}
 
-      {/* Tweaks panel — visible after onboarding so it doesn't break the ritual */}
       {onboarded && window.TweaksPanel && (
         <window.TweaksPanel title="Tweaks">
           <window.TweakSection title="Atmosphere">
@@ -189,7 +244,7 @@ function App() {
           </window.TweakSection>
           <window.TweakSection title="Personalisation">
             <window.TweakToggle label="Bilingual touches (中文)" tweakKey="showChinese" value={t.showChinese} onChange={setTweak} />
-            <window.TweakToggle label="Pet logistics (Biscuit)" tweakKey="showPet" value={t.showPet} onChange={setTweak} />
+            <window.TweakToggle label="Pet logistics" tweakKey="showPet" value={t.showPet} onChange={setTweak} />
             <window.TweakToggle label="Show concierge tab" tweakKey="showConcierge" value={t.showConcierge} onChange={setTweak} />
           </window.TweakSection>
           <window.TweakSection title="First Experience">
@@ -208,48 +263,26 @@ function App() {
   );
 }
 
-// Mount inside an iPhone frame on a stage
-function Stage() {
+// Mount the app full-bleed in a mobile-width column. On phones it fills the
+// viewport; on desktop the design's mobile dimensions are preserved with the
+// rest of the screen filled by the app's own background.
+function Root() {
   return (
     <div style={{
-      minHeight: "100vh", width: "100%",
-      background: "radial-gradient(ellipse at center, #1A1815 0%, #0A0908 70%)",
-      display: "flex", alignItems: "center", justifyContent: "center",
-      padding: "40px 20px",
+      height: "100%", width: "100%",
+      display: "flex", justifyContent: "center", alignItems: "stretch",
+      background: C.bg,
     }}>
-      <div style={{ display: "flex", gap: 60, alignItems: "center", flexWrap: "wrap", justifyContent: "center" }}>
-        {/* Tagline column */}
-        <div style={{ maxWidth: 280, color: C.cream }}>
-          <Mono s={32} />
-          <p style={{ fontFamily: F.sans, fontSize: 9.5, letterSpacing: 3.5, textTransform: "uppercase", color: C.gold, marginTop: 28, marginBottom: 10 }}>The Ledger · Designed for Chloe</p>
-          <h1 style={{ fontFamily: F.display, fontSize: 36, color: C.cream, fontWeight: 400, fontStyle: "italic", lineHeight: 1.1 }}>
-            A private record<br/>of the art of<br/>gathering
-          </h1>
-          <p style={{ fontFamily: F.body, fontSize: 16, color: C.creamSoft, marginTop: 18, lineHeight: 1.7, fontWeight: 300 }}>
-            For ultra-high-net-worth women who plan beautifully and travel often. Tap through her actual app — eleven days before the Riviera, a podcast in production, and a Pomeranian in the carry-on.
-          </p>
-          <div style={{ marginTop: 24, display: "flex", flexDirection: "column", gap: 6 }}>
-            {[
-              "Home — what wants Chloe's eyes today",
-              "Begin — spark to invitation in seven steps",
-              "Trip — itinerary + Biscuit + the four guests",
-              "Margaux — her named human concierge",
-              "Black Book — people & places worth keeping",
-              "Memory — voice notes from each trip",
-              "Gather — host her own salons & tables",
-            ].map((s, i) => (
-              <p key={i} style={{ fontFamily: F.body, fontSize: 13, color: C.stone, fontWeight: 300, fontStyle: "italic" }}>· {s}</p>
-            ))}
-          </div>
-        </div>
-
-        {/* Phone */}
-        <window.IOSDevice width={390} height={820} dark={true}>
-          <App />
-        </window.IOSDevice>
+      <div style={{
+        width: "100%", maxWidth: 430, height: "100%",
+        position: "relative", overflow: "hidden",
+        background: C.bg, color: C.cream,
+        boxShadow: "0 0 60px rgba(0,0,0,0.6)",
+      }}>
+        <App />
       </div>
     </div>
   );
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(<Stage />);
+ReactDOM.createRoot(document.getElementById("root")).render(<Root />);
