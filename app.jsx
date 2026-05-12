@@ -4,7 +4,8 @@ const { Mono, SC, Ini, Btn } = window.ATOMS;
 const { Home, TripDetail } = window.SCREENS_A;
 const { Concierge, BlackBook, Memory, Gatherings } = window.SCREENS_B;
 const { CreateFlow } = window.SCREENS_CREATE;
-const { useState } = React;
+const { Onboarding } = window.ONBOARDING;
+const { useState, useEffect } = React;
 
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
   "palette": "midnight",
@@ -20,12 +21,89 @@ const PALETTES = {
   jade: { bg: "#0E1412", card: "#161E1B", cream: "#E0E8DF", gold: "#9EB7A0", border: "#1F2925" },
 };
 
+const STORAGE_KEY = "ledger.profile.v1";
+
+// Read persisted profile (if any) before first render so the main app
+// reflects who Chloe said she was the moment it opens.
+function loadProfile() {
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch (e) {
+    return null;
+  }
+}
+
+function persistProfile(profile) {
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(profile));
+  } catch (e) {
+    // ignore quota errors — onboarding state is recoverable
+  }
+}
+
+function clearProfile() {
+  try { window.localStorage.removeItem(STORAGE_KEY); } catch (e) {}
+}
+
+// Apply collected onboarding state into the live data so every screen
+// reads "Chloe" (or whoever) consistently. Mutates window.LEDGER in place
+// because components captured the object reference at module load.
+function applyProfile(profile) {
+  if (!profile) return;
+  const me = window.LEDGER.ME;
+  if (profile.firstName) {
+    me.name = profile.firstName;
+    me.initial = profile.firstName.charAt(0).toUpperCase();
+  }
+  if (profile.firstName || profile.lastName) {
+    me.fullName = [profile.firstName, profile.lastName].filter(Boolean).join(" ");
+  }
+  if (typeof profile.cnName === "string") me.cnName = profile.cnName;
+  if (profile.city1) me.city = profile.city1;
+  if (profile.city2) me.city2 = profile.city2;
+
+  const firstPet = (profile.companions || []).find(c => c.kind === "pet" && c.name);
+  if (firstPet) {
+    me.pet = {
+      name: firstPet.name,
+      breed: firstPet.fields?.breed || me.pet?.breed || "",
+      weight: firstPet.fields?.weight || me.pet?.weight || "",
+      emoji: me.pet?.emoji || "🐕",
+    };
+  } else if (profile.companions && profile.companions.every(c => c.kind !== "pet")) {
+    // She removed every pet — keep ME.pet but mark it absent.
+    me.pet = null;
+  }
+
+  window.LEDGER.PROFILE = profile;
+}
+
 function App() {
   const [screen, setScreen] = useState("home");
   const [tripId, setTripId] = useState("riviera");
   const [plan, setPlan] = useState(window.LEDGER.WEEK);
   const [t, setTweak] = window.useTweaks ? window.useTweaks(TWEAK_DEFAULTS) : [TWEAK_DEFAULTS, () => {}];
   const pal = PALETTES[t.palette] || PALETTES.midnight;
+
+  // Onboarding gate — load any saved profile synchronously so we don't flash
+  // the main app on reload for an already-onboarded user.
+  const initialProfile = loadProfile();
+  if (initialProfile) applyProfile(initialProfile);
+  const [onboarded, setOnboarded] = useState(!!initialProfile);
+
+  const completeOnboarding = (profileState) => {
+    applyProfile(profileState);
+    persistProfile(profileState);
+    setOnboarded(true);
+    setScreen("home");
+  };
+
+  const replayOnboarding = () => {
+    clearProfile();
+    setOnboarded(false);
+  };
 
   const navItems = [
     { id: "home", label: "Home" },
@@ -51,49 +129,55 @@ function App() {
 
   return (
     <div style={{ position: "relative", height: "100%", background: pal.bg, color: pal.cream }}>
-      <div style={{ height: "100%", overflowY: "auto", overflowX: "hidden" }}>
-        {current}
-      </div>
+      {!onboarded ? (
+        <Onboarding onDone={completeOnboarding} />
+      ) : (
+        <React.Fragment>
+          <div style={{ height: "100%", overflowY: "auto", overflowX: "hidden" }}>
+            {current}
+          </div>
 
-      {/* Create-flow overlay */}
-      {inCreate && (
-        <div style={{ position: "absolute", inset: 0, background: pal.bg, zIndex: 100, animation: "fadeIn 0.3s ease" }}>
-          <CreateFlow
-            onClose={() => setScreen("home")}
-            onLaunched={() => { setTripId("riviera"); setScreen("trip"); }}
-          />
-        </div>
+          {/* Create-flow overlay */}
+          {inCreate && (
+            <div style={{ position: "absolute", inset: 0, background: pal.bg, zIndex: 100, animation: "fadeIn 0.3s ease" }}>
+              <CreateFlow
+                onClose={() => setScreen("home")}
+                onLaunched={() => { setTripId("riviera"); setScreen("trip"); }}
+              />
+            </div>
+          )}
+
+          {/* Bottom nav — floating glass strip */}
+          {!inCreate && <div style={{
+            position: "absolute", bottom: 0, left: 0, right: 0,
+            background: `${pal.bg}E8`, backdropFilter: "blur(18px)",
+            borderTop: `0.5px solid ${pal.border}`,
+            display: "flex", justifyContent: "space-around",
+            padding: "8px 0 22px",
+            zIndex: 50,
+          }}>
+            {navItems.map(n => {
+              const active = screen === n.id || (n.id === "home" && screen === "trip");
+              return (
+                <button key={n.id} onClick={() => setScreen(n.id)} style={{
+                  flex: 1, background: "none", border: "none", cursor: "pointer",
+                  padding: "8px 4px",
+                  borderTop: active ? `1px solid ${C.gold}` : "1px solid transparent",
+                  transition: "all 0.2s",
+                }}>
+                  <span style={{
+                    fontFamily: F.sans, fontSize: 8.5, letterSpacing: 1.8, textTransform: "uppercase",
+                    color: active ? C.gold : C.stone, fontWeight: active ? 500 : 400,
+                  }}>{n.label}</span>
+                </button>
+              );
+            })}
+          </div>}
+        </React.Fragment>
       )}
 
-      {/* Bottom nav — floating glass strip */}
-      {!inCreate && <div style={{
-        position: "absolute", bottom: 0, left: 0, right: 0,
-        background: `${pal.bg}E8`, backdropFilter: "blur(18px)",
-        borderTop: `0.5px solid ${pal.border}`,
-        display: "flex", justifyContent: "space-around",
-        padding: "8px 0 22px",
-        zIndex: 50,
-      }}>
-        {navItems.map(n => {
-          const active = screen === n.id || (n.id === "home" && screen === "trip");
-          return (
-            <button key={n.id} onClick={() => setScreen(n.id)} style={{
-              flex: 1, background: "none", border: "none", cursor: "pointer",
-              padding: "8px 4px",
-              borderTop: active ? `1px solid ${C.gold}` : "1px solid transparent",
-              transition: "all 0.2s",
-            }}>
-              <span style={{
-                fontFamily: F.sans, fontSize: 8.5, letterSpacing: 1.8, textTransform: "uppercase",
-                color: active ? C.gold : C.stone, fontWeight: active ? 500 : 400,
-              }}>{n.label}</span>
-            </button>
-          );
-        })}
-      </div>}
-
-      {/* Tweaks panel */}
-      {window.TweaksPanel && (
+      {/* Tweaks panel — visible after onboarding so it doesn't break the ritual */}
+      {onboarded && window.TweaksPanel && (
         <window.TweaksPanel title="Tweaks">
           <window.TweakSection title="Atmosphere">
             <window.TweakRadio label="Palette" tweakKey="palette" value={t.palette} onChange={setTweak}
@@ -107,6 +191,16 @@ function App() {
             <window.TweakToggle label="Bilingual touches (中文)" tweakKey="showChinese" value={t.showChinese} onChange={setTweak} />
             <window.TweakToggle label="Pet logistics (Biscuit)" tweakKey="showPet" value={t.showPet} onChange={setTweak} />
             <window.TweakToggle label="Show concierge tab" tweakKey="showConcierge" value={t.showConcierge} onChange={setTweak} />
+          </window.TweakSection>
+          <window.TweakSection title="First Experience">
+            <button onClick={replayOnboarding} style={{
+              padding: "8px 12px", background: "transparent",
+              border: `0.5px solid ${C.borderLight}`, color: C.creamSoft,
+              fontFamily: F.sans, fontSize: 9.5, letterSpacing: 2.4,
+              textTransform: "uppercase", cursor: "pointer", width: "100%",
+            }}>
+              Replay onboarding
+            </button>
           </window.TweakSection>
         </window.TweaksPanel>
       )}
