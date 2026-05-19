@@ -304,13 +304,152 @@ const NoCurationYet = () => (
   </div>
 );
 
+// ─── PARSED INBOX ITEMS ─────────────────────────────────────
+const KIND_META = {
+  hotel:      { color: C.gold,  glyph: "▣" },
+  flight:     { color: C.sea,   glyph: "→" },
+  restaurant: { color: C.blush, glyph: "●" },
+  transfer:   { color: C.sage,  glyph: "↳" },
+  event:      { color: C.dusk,  glyph: "✦" },
+  other:      { color: C.stone, glyph: "·" },
+};
+
+const fmtWhen = (iso) => {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+};
+
+const ForwardedItem = ({ item, onDelete }) => {
+  const meta = KIND_META[item.kind] || KIND_META.other;
+  const when = fmtWhen(item.when);
+  return (
+    <div style={{ padding: "12px 12px", border: `0.5px solid ${meta.color}40`, background: `${meta.color}08`, borderLeft: `1.5px solid ${meta.color}`, marginBottom: 8 }}>
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+          <span style={{ fontFamily: F.mono, fontSize: 11, color: meta.color }}>{meta.glyph}</span>
+          <span style={{ fontFamily: F.mono, fontSize: 8.5, color: meta.color, letterSpacing: 1.4, textTransform: "uppercase" }}>{item.kind}</span>
+        </div>
+        {onDelete && (
+          <button onClick={() => onDelete(item.id)} style={{ background: "none", border: "none", color: C.stoneSoft, cursor: "pointer", fontSize: 14, lineHeight: 1, padding: 0 }}>×</button>
+        )}
+      </div>
+      <p style={{ fontFamily: F.display, fontSize: 16, fontStyle: "italic", color: C.cream, marginTop: 4, lineHeight: 1.2 }}>{item.title}</p>
+      {when && <p style={{ fontFamily: F.mono, fontSize: 9.5, color: C.creamSoft, marginTop: 4, letterSpacing: 0.4 }}>{when}{item.where ? ` · ${item.where}` : ""}</p>}
+      {!when && item.where && <p style={{ fontFamily: F.mono, fontSize: 9.5, color: C.stone, marginTop: 4 }}>{item.where}</p>}
+      {item.details && <p style={{ fontFamily: F.body, fontSize: 13, color: C.creamSoft, fontStyle: "italic", fontWeight: 300, lineHeight: 1.45, marginTop: 6 }}>{item.details}</p>}
+    </div>
+  );
+};
+
+const PasteEmail = ({ tripId, onParsed }) => {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState("");
+  const [status, setStatus] = useState(null);
+  const [error, setError] = useState("");
+
+  const send = async () => {
+    if (!text.trim() || !window.LEDGER_API) return;
+    setStatus("sending"); setError("");
+    try {
+      const result = await window.LEDGER_API.pasteEmail({ tripId, text });
+      setStatus("ok");
+      setText("");
+      onParsed && onParsed(result.items || []);
+      setTimeout(() => { setStatus(null); setOpen(false); }, 1500);
+    } catch (e) {
+      setStatus("err");
+      setError(String(e.message || e));
+    }
+  };
+
+  if (!open) {
+    return (
+      <button onClick={() => setOpen(true)} style={{
+        width: "100%", padding: "10px 12px", textAlign: "left",
+        background: "transparent", border: `0.5px dashed ${C.borderLight}`,
+        color: C.stone, cursor: "pointer",
+        fontFamily: F.sans, fontSize: 9, letterSpacing: 2, textTransform: "uppercase",
+      }}>+ Paste an email to test the parser</button>
+    );
+  }
+
+  return (
+    <div style={{ padding: "14px 14px", border: `0.5px solid ${C.borderLight}`, background: C.bgSoft }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
+        <SC size={8.5} color={C.gold}>Paste & parse</SC>
+        <button onClick={() => { setOpen(false); setStatus(null); setText(""); }} style={{ background: "none", border: "none", color: C.stone, cursor: "pointer", fontSize: 14, lineHeight: 1, padding: 0 }}>×</button>
+      </div>
+      <p style={{ fontFamily: F.body, fontSize: 13, color: C.stone, fontStyle: "italic", fontWeight: 300, lineHeight: 1.4, marginBottom: 10 }}>
+        Paste any confirmation body. The parser reads it the same way it would if forwarded.
+      </p>
+      <textarea rows={6} value={text} onChange={e => setText(e.target.value)}
+        placeholder="From: hotel@aman.com\nSubject: Reservation confirmation\n\nDear Ms Lam, your reservation..."
+        style={{ fontFamily: F.mono, fontSize: 12, color: C.cream, padding: "10px 12px", background: C.card, border: `0.5px solid ${C.border}`, lineHeight: 1.5, resize: "vertical", minHeight: 120 }} />
+      <div style={{ display: "flex", gap: 10, marginTop: 10, alignItems: "center" }}>
+        <button onClick={send} disabled={status === "sending" || !text.trim()} style={{
+          padding: "8px 14px", background: status === "sending" ? C.borderLight : C.gold,
+          color: C.bg, border: "none",
+          fontFamily: F.sans, fontSize: 9, letterSpacing: 2.4, textTransform: "uppercase",
+          cursor: status === "sending" || !text.trim() ? "default" : "pointer",
+          opacity: !text.trim() ? 0.5 : 1,
+        }}>{status === "sending" ? "Parsing..." : "Parse"}</button>
+        {status === "ok" && <span style={{ fontFamily: F.mono, fontSize: 9.5, color: C.sage, letterSpacing: 1 }}>✓ Parsed</span>}
+        {status === "err" && <span style={{ fontFamily: F.mono, fontSize: 9.5, color: C.blush, letterSpacing: 0.5, flex: 1, wordBreak: "break-word" }}>{error}</span>}
+      </div>
+    </div>
+  );
+};
+
 // ─── MAIN ───────────────────────────────────────────────────
 const TripDetail = ({ trip, tripNumber, back, updateItem }) => {
   const [packingVoted, setPackingVoted] = useState(false);
+  const [forwarded, setForwarded] = useState([]);
 
   const curation = matchCuration(trip.where);
   const days = tripLength(trip.start, trip.end);
   const itemStates = trip.items || {};
+
+  // Pull forwarded items from the worker. Refresh on mount + when the tab
+  // regains focus (she just sent an email and switched back).
+  const refresh = React.useCallback(async () => {
+    if (!window.LEDGER_API) return;
+    const items = await window.LEDGER_API.getItems(trip.id);
+    setForwarded(items);
+  }, [trip.id]);
+
+  React.useEffect(() => {
+    refresh();
+    const onFocus = () => refresh();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [refresh]);
+
+  const deleteForwarded = async (itemId) => {
+    if (!window.LEDGER_API) return;
+    await window.LEDGER_API.deleteItem(trip.id, itemId);
+    refresh();
+  };
+
+  // Bucket forwarded items onto trip days by `when` date
+  const forwardedByDay = useMemo(() => {
+    if (!trip.start) return { buckets: {}, unscheduled: forwarded };
+    const startDate = new Date(trip.start + "T00:00:00");
+    const buckets = {};
+    const unscheduled = [];
+    for (const item of forwarded) {
+      if (!item.when) { unscheduled.push(item); continue; }
+      const w = new Date(item.when);
+      if (Number.isNaN(w.getTime())) { unscheduled.push(item); continue; }
+      const dayNum = Math.floor((w - startDate) / (1000 * 60 * 60 * 24)) + 1;
+      if (dayNum < 1 || dayNum > days) { unscheduled.push(item); continue; }
+      buckets[dayNum] = buckets[dayNum] || [];
+      buckets[dayNum].push(item);
+    }
+    Object.keys(buckets).forEach(d => buckets[d].sort((a, b) => (a.when || "").localeCompare(b.when || "")));
+    return { buckets, unscheduled };
+  }, [forwarded, trip.start, days]);
 
   // group "yes" items by day
   const itemsByDay = useMemo(() => {
@@ -425,7 +564,54 @@ const TripDetail = ({ trip, tripNumber, back, updateItem }) => {
           </section>
         )}
 
-        {/* The day strip — confirmed items per day */}
+        {/* Forwarded — what the inbox parser has captured */}
+        <section>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+            <h2 style={{ fontFamily: F.display, fontSize: 19, fontStyle: "italic", fontWeight: 400, color: C.cream }}>Forwarded</h2>
+            <SC size={8} color={C.stone}>{forwarded.length} {forwarded.length === 1 ? "item" : "items"}</SC>
+          </div>
+          <p style={{ fontFamily: F.body, fontSize: 13, color: C.stone, fontStyle: "italic", fontWeight: 300, marginBottom: 12, lineHeight: 1.5 }}>
+            Anything sent to <span style={{ color: C.creamSoft, fontFamily: F.mono, fontSize: 11 }}>{trip.address}</span> appears here, placed on the right day.
+          </p>
+
+          {forwarded.length === 0 ? (
+            <div style={{ padding: "16px 16px", border: `0.5px dashed ${C.borderLight}`, background: `${C.card}80`, marginBottom: 10 }}>
+              <p style={{ fontFamily: F.body, fontSize: 13.5, color: C.stone, fontWeight: 300, lineHeight: 1.5, fontStyle: "italic" }}>
+                Nothing forwarded yet. Forward a confirmation to the inbox above — or test the parser by pasting one below.
+              </p>
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              {Array.from({ length: days }).map((_, i) => {
+                const dayNum = i + 1;
+                const items = forwardedByDay.buckets?.[dayNum] || [];
+                if (items.length === 0) return null;
+                const date = dateForDay(trip.start, i);
+                return (
+                  <div key={dayNum}>
+                    <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 6 }}>
+                      <SC size={8.5} color={C.gold}>Day {String(dayNum).padStart(2, "0")}</SC>
+                      <span style={{ fontFamily: F.mono, fontSize: 9, color: C.stoneSoft }}>{fmtDay(date)}</span>
+                    </div>
+                    {items.map(it => <ForwardedItem key={it.id} item={it} onDelete={deleteForwarded} />)}
+                  </div>
+                );
+              })}
+              {forwardedByDay.unscheduled?.length > 0 && (
+                <div>
+                  <SC size={8.5} color={C.stone} style={{ marginBottom: 6, display: "inline-block" }}>Date pending</SC>
+                  {forwardedByDay.unscheduled.map(it => <ForwardedItem key={it.id} item={it} onDelete={deleteForwarded} />)}
+                </div>
+              )}
+            </div>
+          )}
+
+          <div style={{ marginTop: 14 }}>
+            <PasteEmail tripId={trip.id} onParsed={refresh} />
+          </div>
+        </section>
+
+        {/* The day strip — items she's marked Yes from the curation */}
         {days > 0 && (
           <section>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 12 }}>

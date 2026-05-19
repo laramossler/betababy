@@ -1,11 +1,48 @@
 // ─── MVP APP ─ wires the flow into a full-bleed web app ─────
 // Drops the IOSDevice + sidebar wrapper that lived in the design preview.
 // Persists user + trips to localStorage so a reload doesn't lose her work.
+// Registers each trip's inbox with the worker so forwarded mail can route.
 
 const { useState, useMemo, useEffect } = React;
 const { C, F, Mono, SC, Welcome, YouStep, TripStep, CompanionsStep, ForwardStep, ReadyStep } = window.MVP;
 const { Home } = window.HOME;
 const { TripDetail } = window.TRIP_DETAIL;
+
+// API base — same-origin when served by the Worker; override for local dev.
+const API_BASE = window.LEDGER_API_BASE || "";
+window.LEDGER_API = {
+  async registerInbox(address, tripId) {
+    try {
+      const r = await fetch(`${API_BASE}/api/trips/register`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ address, tripId }),
+      });
+      return r.ok;
+    } catch (e) { return false; }
+  },
+  async getItems(tripId) {
+    try {
+      const r = await fetch(`${API_BASE}/api/trips/${encodeURIComponent(tripId)}/items`);
+      if (!r.ok) return [];
+      const j = await r.json();
+      return Array.isArray(j.items) ? j.items : [];
+    } catch (e) { return []; }
+  },
+  async pasteEmail({ tripId, from, subject, text }) {
+    const r = await fetch(`${API_BASE}/api/parse-and-store`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ tripId, from, subject, text }),
+    });
+    if (!r.ok) throw new Error((await r.json())?.error || `HTTP ${r.status}`);
+    return await r.json();
+  },
+  async deleteItem(tripId, itemId) {
+    const r = await fetch(`${API_BASE}/api/trips/${encodeURIComponent(tripId)}/items/${encodeURIComponent(itemId)}`, { method: "DELETE" });
+    return r.ok;
+  },
+};
 
 const STORAGE_KEY = "ledger.mvp.v1";
 
@@ -89,6 +126,8 @@ function App() {
     const id = nextTripId();
     const trip = { ...draft, id, address };
     setTrips(prev => [...prev, trip]);
+    // Tell the worker which trip this address routes to. Fire and forget.
+    window.LEDGER_API?.registerInbox(address, id);
     return trip;
   };
 
