@@ -113,14 +113,36 @@ window.LEDGER_API_BASE = "https://ledger-mvp.<your-subdomain>.workers.dev"
 Items are dedup'd on a SHA-1 of `kind + title + when + where`, so forwarding
 the same confirmation twice doesn't duplicate.
 
+## Auth — URL-as-credential
+
+There's no signup or password. You generate a long opaque key per user
+(e.g. `chloe-7f3k9p3q9`) and share it out-of-band (Signal, iMessage).
+
+- The user opens `https://theledger.co/?k=chloe-7f3k9p3q9` once
+- The frontend stores the key in localStorage and strips it from the URL
+- Every subsequent API call carries it as `x-ledger-key: <key>`
+- All KV under that user is namespaced as `user:<key>:*`
+
+Key requirements (enforced server-side):
+- 8+ chars, lowercase alphanumerics + hyphens
+- Anything else returns 401
+
+To revoke access, change the key (the server-side data under the old key
+still exists — copy it to the new namespace if you want continuity).
+
 ## API
+
+All endpoints require an `x-ledger-key` header.
 
 | Method   | Path                                              | Description                              |
 |----------|---------------------------------------------------|------------------------------------------|
+| GET      | `/api/state`                                      | Returns the user's mirrored state        |
+| POST     | `/api/state`                                      | Body: `{ user, trips, wants }` — sync    |
 | POST     | `/api/trips/register`                             | Body: `{ address, tripId }` — route mail |
 | GET      | `/api/trips/:tripId/items`                        | List parsed items for a trip             |
-| POST     | `/api/parse-and-store`                            | Body: `{ tripId, text, from?, subject? }` — paste-an-email debugger |
+| POST     | `/api/parse-and-store`                            | Body: `{ tripId, text, from?, subject? }` |
 | DELETE   | `/api/trips/:tripId/items/:itemId`                | Remove a single item                     |
+| POST     | `/api/feedback`                                   | Body: `{ working, notWorking, other, wants }` — appends to `user:<key>:notes` and (if `FORWARD_TO_LARA` is set) emails it via MailChannels |
 
 ## Parser notes
 

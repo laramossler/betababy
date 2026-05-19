@@ -206,13 +206,17 @@ const Placeholder = ({ id, mark, name, blurb, when, accent = C.stone, voted, onV
 );
 
 // ── HOME ────────────────────────────────────────────────────
-const Home = ({ user, trips, onNew, onOpen, onRestart }) => {
+const Home = ({ user, trips, wants: wantsProp, toggleWant: toggleWantProp, onNew, onOpen, onRestart, onSignOut }) => {
   const { useState } = React;
-  const [wants, setWants] = useState(new Set());
   const [feedbackOpen, setFeedbackOpen] = useState(false);
 
+  // Lifted wants (from app.jsx, persisted) — fall back to local state if
+  // this component is ever rendered standalone.
+  const [localWants, setLocalWants] = useState(new Set());
+  const wants = wantsProp ? new Set(wantsProp) : localWants;
   const toggleWant = (id) => {
-    setWants(prev => {
+    if (toggleWantProp) return toggleWantProp(id);
+    setLocalWants(prev => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id); else next.add(id);
       return next;

@@ -56,11 +56,29 @@ const Area = ({ value, onChange, placeholder, rows = 3 }) => (
     }} />
 );
 
+const DRAFT_KEY = "ledger.mvp.feedbackDraft";
+const loadDraft = () => {
+  try { return JSON.parse(window.localStorage.getItem(DRAFT_KEY) || "null") || {}; }
+  catch { return {}; }
+};
+const saveDraft = (d) => { try { window.localStorage.setItem(DRAFT_KEY, JSON.stringify(d)); } catch {} };
+const clearDraft = () => { try { window.localStorage.removeItem(DRAFT_KEY); } catch {} };
+
 const FeedbackSheet = ({ open, onClose, wants, toggleWant, user }) => {
-  const [working, setWorking] = useState("");
-  const [notWorking, setNotWorking] = useState("");
-  const [other, setOther] = useState("");
+  // Restore any in-progress text — closing or refreshing doesn't lose what
+  // she was typing.
+  const initial = loadDraft();
+  const [working, setWorking] = useState(initial.working || "");
+  const [notWorking, setNotWorking] = useState(initial.notWorking || "");
+  const [other, setOther] = useState(initial.other || "");
   const [sent, setSent] = useState(false);
+  const [error, setError] = useState("");
+
+  // Auto-save draft on every keystroke
+  useEffect(() => {
+    if (working || notWorking || other) saveDraft({ working, notWorking, other });
+    else clearDraft();
+  }, [working, notWorking, other]);
 
   // animate slide-up via mount/unmount + transform
   const [mounted, setMounted] = useState(open);
@@ -69,7 +87,7 @@ const FeedbackSheet = ({ open, onClose, wants, toggleWant, user }) => {
     if (open) {
       setMounted(true);
       setSent(false);
-      // next tick — let it mount before triggering transition
+      setError("");
       const t = setTimeout(() => setVisible(true), 16);
       return () => clearTimeout(t);
     } else {
@@ -83,10 +101,23 @@ const FeedbackSheet = ({ open, onClose, wants, toggleWant, user }) => {
 
   const hasContent = working.trim() || notWorking.trim() || other.trim() || wants.size > 0;
 
-  const send = () => {
-    // In real product: POST to makers. Here: acknowledge.
+  const send = async () => {
+    setError("");
+    const note = {
+      working: working.trim(),
+      notWorking: notWorking.trim(),
+      other: other.trim(),
+      wants: Array.from(wants),
+    };
+    // POST to the worker. If the call fails, keep the draft and surface
+    // the error rather than swallowing it.
+    const ok = await (window.LEDGER_API?.sendFeedback?.(note) ?? Promise.resolve(false));
+    if (!ok) {
+      setError("Couldn't reach the makers. Note kept — try again in a moment.");
+      return;
+    }
+    clearDraft();
     setSent(true);
-    // Clear & close after a beat
     setTimeout(() => {
       setWorking(""); setNotWorking(""); setOther("");
       onClose();
@@ -180,6 +211,11 @@ const FeedbackSheet = ({ open, onClose, wants, toggleWant, user }) => {
 
             {/* Footer */}
             <div style={{ padding: "14px 24px 28px", flexShrink: 0, background: `linear-gradient(to top, ${C.bg} 75%, transparent)` }}>
+              {error && (
+                <p style={{ textAlign: "center", marginBottom: 10, fontFamily: F.body, fontSize: 13, color: C.blush, fontStyle: "italic" }}>
+                  {error}
+                </p>
+              )}
               <Btn full primary onClick={send} disabled={!hasContent}>Send to the makers</Btn>
               <p style={{ textAlign: "center", marginTop: 12, fontFamily: F.sans, fontSize: 9, color: C.stoneSoft, letterSpacing: 1.5, textTransform: "uppercase" }}>
                 Goes straight to a human · not a form
