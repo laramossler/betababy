@@ -5,22 +5,49 @@ const { Home, TripDetail } = window.SCREENS_A;
 const { Concierge, BlackBook, Memory, Gatherings } = window.SCREENS_B;
 const { CreateFlow } = window.SCREENS_CREATE;
 const { WovenFlow, loadFlow, clearFlow } = window.WOVEN;
-const { PICKS } = window.WOVEN_A;
 const { DAYS, SLOTS, planFromVerdicts } = window.WOVEN_B;
 const { useState } = React;
 
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
   "palette": "midnight",
+  "typeface": "playfair",
   "showChinese": true,
   "showPet": true,
   "showConcierge": true
 }/*EDITMODE-END*/;
 
+// Full atlas palettes — every C token has a value in every palette so
+// applyPalette can swap them all in place and every screen reads coherent
+// colors. Mutating the shared C object lets every component pick up the
+// new palette on the next render without prop drilling.
 const PALETTES = {
-  midnight: { bg: "#0A0908", card: "#151413", cream: "#EDE8DF", gold: "#B8A07A", border: "#252320" },
-  porcelain: { bg: "#F4EFE6", card: "#EAE3D5", cream: "#1A1715", gold: "#8A6E3F", border: "#D4CABA" },
-  jade: { bg: "#0E1412", card: "#161E1B", cream: "#E0E8DF", gold: "#9EB7A0", border: "#1F2925" },
+  midnight: {
+    bg: "#0A0908", bgSoft: "#111010", card: "#151413", cardHover: "#1C1B19",
+    cream: "#EDE8DF", creamSoft: "#B8B0A2",
+    gold: "#B8A07A", goldDeep: "#9A8460", goldMuted: "#7A6D54",
+    stone: "#928679", border: "#252320", borderLight: "#322F2B",
+    blush: "#C4A89A", sage: "#8E9E82", sea: "#7A9BA0", dusk: "#9890AE", red: "#B07070",
+  },
+  porcelain: {
+    bg: "#F4EFE6", bgSoft: "#EDE6DA", card: "#EAE3D5", cardHover: "#E4DBCA",
+    cream: "#1A1715", creamSoft: "#4A3F35",
+    gold: "#8A6E3F", goldDeep: "#6E5430", goldMuted: "#A89070",
+    stone: "#7A6B5A", border: "#D4CABA", borderLight: "#C4B8A4",
+    blush: "#9A6E5A", sage: "#5E7048", sea: "#506878", dusk: "#6A6080", red: "#9A4848",
+  },
+  jade: {
+    bg: "#0E1412", bgSoft: "#131B18", card: "#161E1B", cardHover: "#1E2823",
+    cream: "#E0E8DF", creamSoft: "#A8B5A8",
+    gold: "#9EB7A0", goldDeep: "#7E977E", goldMuted: "#6A8068",
+    stone: "#7A8A7C", border: "#1F2925", borderLight: "#2A3530",
+    blush: "#B8A89A", sage: "#A8C0A0", sea: "#7AA0A0", dusk: "#8898A8", red: "#A07878",
+  },
 };
+
+function applyPalette(palName) {
+  const pal = PALETTES[palName] || PALETTES.midnight;
+  Object.assign(C, pal);
+}
 
 // ─── Seed snapshots — keep so applyFromFlow is idempotent ─────
 const SEED_TRIPS = window.LEDGER.TRIPS.slice();
@@ -36,10 +63,7 @@ function resetSeed() {
   window.LEDGER.CONCIERGE_THREAD.push(...SEED_THREAD);
 }
 
-// ─── Translate Woven flow state → main-app data ───────────────
-// Builds the Rome trip from the kept picks/suggestions, and replaces the
-// legacy demo Margaux thread with a real first exchange derived from the
-// call captures + the user's first word (here: the call chips).
+// ─── Translate first-sitting state → main-app data ────────────
 function applyFromFlow(flow) {
   resetSeed();
   if (!flow || !flow.completed) return;
@@ -52,7 +76,6 @@ function applyFromFlow(flow) {
   const who = captures.rome_who?.chips || [];
   const when = captures.rome_when?.chips || [];
 
-  // Compose Rome trip and prepend
   const autoplan = planFromVerdicts(verdicts);
   const getEntry = (di, sid) => {
     const k = `${di}-${sid}`;
@@ -85,7 +108,6 @@ function applyFromFlow(flow) {
     })),
   };
 
-  // Replace concierge thread with a real opening exchange
   const thread = window.LEDGER.CONCIERGE_THREAD;
   thread.length = 0;
   thread.push({ from: "margaux", time: "Today, just now", body: "Thank you for the call. Quick recap so you've got the same notes I do." });
@@ -96,11 +118,9 @@ function applyFromFlow(flow) {
   thread.push({ from: "margaux", time: "Today, just now", body: `I've laid your five days against Lara's picks. ${keptCount} kept, ${totalPlaces} slots filled. Reservations confirmed in the ledger as I clear them.` });
   thread.push({ from: "me", time: "Today, just now", body: "Thank you." });
 
-  // Identity touches — tones into ME so the rest of the app can read them.
   window.LEDGER.ME.tones = tones;
 }
 
-// Apply on first load if there's a completed sitting
 const INITIAL_FLOW = loadFlow();
 applyFromFlow(INITIAL_FLOW);
 
@@ -108,7 +128,9 @@ function App() {
   const [screen, setScreen] = useState("home");
   const [tripId, setTripId] = useState(window.LEDGER.TRIPS[0]?.id || "rome_jul");
   const [plan, setPlan] = useState(window.LEDGER.WEEK);
+  const [dynamicTrips, setDynamicTrips] = useState([]);
   const [t, setTweak] = window.useTweaks ? window.useTweaks(TWEAK_DEFAULTS) : [TWEAK_DEFAULTS, () => {}];
+  applyPalette(t.palette);
   const pal = PALETTES[t.palette] || PALETTES.midnight;
   const [done, setDone] = useState(!!INITIAL_FLOW.completed);
 
@@ -122,7 +144,15 @@ function App() {
   const replay = () => {
     clearFlow();
     resetSeed();
+    setDynamicTrips([]);
     setDone(false);
+  };
+
+  // CreateFlow hands back a fully-formed trip object on lock-in
+  const launchTrip = (tripPayload) => {
+    setDynamicTrips(prev => [tripPayload, ...prev]);
+    setTripId(tripPayload.id);
+    setScreen("trip");
   };
 
   const navItems = [
@@ -135,13 +165,13 @@ function App() {
 
   const current = (() => {
     switch (screen) {
-      case "home": return <Home go={setScreen} setTrip={setTripId} />;
-      case "trip": return <TripDetail tripId={tripId} go={setScreen} plan={plan} setPlan={setPlan} />;
+      case "home": return <Home go={setScreen} setTrip={setTripId} dynamicTrips={dynamicTrips} />;
+      case "trip": return <TripDetail tripId={tripId} go={setScreen} plan={plan} setPlan={setPlan} dynamicTrips={dynamicTrips} />;
       case "concierge": return <Concierge go={setScreen} />;
       case "book": return <BlackBook go={setScreen} />;
       case "memory": return <Memory go={setScreen} />;
       case "gatherings": return <Gatherings go={setScreen} />;
-      default: return <Home go={setScreen} setTrip={setTripId} />;
+      default: return <Home go={setScreen} setTrip={setTripId} dynamicTrips={dynamicTrips} />;
     }
   })();
 
@@ -161,7 +191,7 @@ function App() {
             <div style={{ position: "absolute", inset: 0, background: pal.bg, zIndex: 100, animation: "fadeIn 0.3s ease" }}>
               <CreateFlow
                 onClose={() => setScreen("home")}
-                onLaunched={() => { setTripId(window.LEDGER.TRIPS[0]?.id || "rome_jul"); setScreen("trip"); }}
+                onLaunched={launchTrip}
               />
             </div>
           )}
@@ -205,7 +235,7 @@ function App() {
           </window.TweakSection>
           <window.TweakSection title="Personalisation">
             <window.TweakToggle label="Bilingual touches (中文)" tweakKey="showChinese" value={t.showChinese} onChange={setTweak} />
-            <window.TweakToggle label="Pet logistics" tweakKey="showPet" value={t.showPet} onChange={setTweak} />
+            <window.TweakToggle label="Pet logistics (Biscuit)" tweakKey="showPet" value={t.showPet} onChange={setTweak} />
             <window.TweakToggle label="Show concierge tab" tweakKey="showConcierge" value={t.showConcierge} onChange={setTweak} />
           </window.TweakSection>
           <window.TweakSection title="First Sitting">

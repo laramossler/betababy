@@ -4,10 +4,11 @@ const { Mono, Rule, SC, Tag, Ini, Btn, Imagery, Dot, Status, Divider, PetTag } =
 const { useState, useEffect, useRef } = React;
 
 // ─── HOME — Chloe's dashboard ────────────────────────────
-function Home({ go, setTrip }) {
-  const active = TRIPS.find(t => t.status === "active");
-  const upcoming = TRIPS.filter(t => t.status === "drafting");
-  const past = TRIPS.filter(t => t.status === "past");
+function Home({ go, setTrip, dynamicTrips = [] }) {
+  const allTrips = [...dynamicTrips, ...TRIPS];
+  const active = allTrips.find(t => t.status === "active");
+  const upcoming = allTrips.filter(t => t.status === "drafting");
+  const past = allTrips.filter(t => t.status === "past");
 
   // Time in HK + LDN (mock)
   const [now, setNow] = useState(new Date());
@@ -195,12 +196,17 @@ function Home({ go, setTrip }) {
 }
 
 // ─── TRIP DETAIL ─────────────────────────────────────────
-function TripDetail({ tripId, go, plan, setPlan }) {
-  const trip = TRIPS.find(t => t.id === tripId) || TRIPS[0];
+function TripDetail({ tripId, go, plan, setPlan, dynamicTrips = [] }) {
+  const trip = [...dynamicTrips, ...TRIPS].find(t => t.id === tripId) || TRIPS[0];
   const [tab, setTab] = useState("itinerary");
   const [expanded, setExpanded] = useState(null);
 
+  // Use trip-specific events if defined, otherwise the editable Riviera plan
+  const tripPlan = trip.events || plan;
+  const isEditable = !trip.events;
+
   const vote = (di, eid) => {
+    if (!isEditable) return;
     setPlan(p => p.map((day, i) => i !== di ? day : { ...day, events: day.events.map(ev => {
       if (ev.id !== eid) return ev;
       const v = { ...ev.votes }; v.chloe ? delete v.chloe : v.chloe = 1;
@@ -242,9 +248,88 @@ function TripDetail({ tripId, go, plan, setPlan }) {
         ))}
       </div>
 
-      {tab === "itinerary" && (
+      {tab === "itinerary" && trip.drafting && (
+        <div style={{ padding: "32px 22px" }}>
+          {/* Consensus banner */}
+          <div style={{ marginBottom: 18, padding: "16px 16px", border: `0.5px solid ${C.gold}40`, background: `${C.gold}06`, borderLeft: `1.5px solid ${C.gold}` }}>
+            <SC color={C.gold} size={8.5}>Locked from the circle</SC>
+            <p style={{ fontFamily: F.body, fontSize: 13.5, color: C.cream, fontStyle: "italic", lineHeight: 1.55, marginTop: 8, fontWeight: 300 }}>
+              "{trip.consensus?.dream}"
+            </p>
+            {trip.consensus?.vibes && (
+              <div style={{ marginTop: 10, display: "flex", gap: 4, flexWrap: "wrap" }}>
+                {trip.consensus.vibes.map(v => <Tag key={v} filled color={C.gold} size={8}>{v}</Tag>)}
+              </div>
+            )}
+          </div>
+
+          {/* Drafting state */}
+          <div style={{ padding: "32px 22px", border: `0.5px solid ${C.border}`, background: C.card, textAlign: "center" }}>
+            <div style={{ display: "inline-flex", marginBottom: 16 }}>
+              <Ini letter="M" color={C.blush} s={48} />
+            </div>
+            <SC color={C.blush}>Margaux · Concierge</SC>
+            <h2 style={{ fontFamily: F.display, fontSize: 22, color: C.cream, fontWeight: 400, fontStyle: "italic", marginTop: 12, lineHeight: 1.25 }}>
+              Drafting your week
+            </h2>
+            <p style={{ fontFamily: F.body, fontSize: 13.5, color: C.creamSoft, fontStyle: "italic", lineHeight: 1.6, marginTop: 12, fontWeight: 300 }}>
+              "I'll have a first pass for you in 48 hours — villa options, the chef I'm thinking of, the boat day. The rest we'll shape together."
+            </p>
+            <Rule w="40px" m="20px auto" />
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, textAlign: "left", maxWidth: 280, margin: "0 auto" }}>
+              {[
+                { l: "Scoping villas", s: "3–5 properties matching the vibe" },
+                { l: "Holding key tables", s: "Best restaurants in the window" },
+                { l: "Booking your private chef", s: "Two referrals already in hand" },
+                { l: "Pet logistics", s: trip.pets?.length ? "Biscuit's papers begin tomorrow" : "—" },
+                { l: "Drafting day-by-day", s: "Built around the consensus" },
+              ].filter(i => i.s !== "—").map((i, ix) => (
+                <div key={ix} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0" }}>
+                  <Dot color={C.gold} s={4} />
+                  <div style={{ flex: 1 }}>
+                    <p style={{ fontFamily: F.display, fontSize: 13, color: C.cream, fontWeight: 500 }}>{i.l}</p>
+                    <p style={{ fontFamily: F.body, fontSize: 11, color: C.stone, fontStyle: "italic", marginTop: 1, fontWeight: 300 }}>{i.s}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p style={{ fontFamily: F.mono, fontSize: 9, color: C.stone, marginTop: 18, letterSpacing: 1 }}>EST. READY · 48H</p>
+          </div>
+
+          {/* Guest list preview */}
+          <div style={{ marginTop: 18 }}>
+            <SC style={{ marginBottom: 10 }}>The Circle · {trip.guests?.length || 0}</SC>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {trip.guests?.map(id => {
+                const g = CIRCLE.find(c => c.id === id);
+                if (!g) return null;
+                return (
+                  <div key={id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", border: `0.5px solid ${C.border}`, background: C.card }}>
+                    <Ini letter={g.initial} s={22} />
+                    <span style={{ fontFamily: F.body, fontSize: 13, color: C.cream, fontWeight: 300 }}>{g.name}</span>
+                  </div>
+                );
+              })}
+              {trip.pets?.length > 0 && (
+                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", border: `0.5px solid ${C.border}`, background: C.card }}>
+                  <PetTag s={22} />
+                  <span style={{ fontFamily: F.body, fontSize: 13, color: C.cream, fontWeight: 300 }}>Biscuit</span>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {tab === "itinerary" && !trip.drafting && (
         <div style={{ padding: "24px 18px" }}>
-          {plan.map((day, di) => (
+          {trip.status === "past" && (
+            <div style={{ marginBottom: 22, padding: "14px 14px", border: `0.5px solid ${C.border}`, background: C.card, borderLeft: `1.5px solid ${C.dusk}` }}>
+              <SC color={C.dusk} size={8.5}>Memory · {trip.title}</SC>
+              <p style={{ fontFamily: F.body, fontSize: 13.5, color: C.cream, fontStyle: "italic", lineHeight: 1.55, marginTop: 6, fontWeight: 300 }}>"{trip.note}"</p>
+            </div>
+          )}
+          {tripPlan.map((day, di) => (
             <div key={day.day} style={{ marginBottom: 32 }}>
               <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 12, paddingBottom: 10, borderBottom: `0.5px solid ${C.border}` }}>
                 <span style={{ fontFamily: F.display, fontSize: 36, fontWeight: 300, color: C.gold, lineHeight: 1, opacity: 0.25 }}>{String(day.day).padStart(2, "0")}</span>

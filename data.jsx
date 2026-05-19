@@ -86,6 +86,38 @@ const TRIPS = [
     role: "host",
     guests: ["chloe", "yuki", "iris"],
     note: "The one we're still talking about.",
+    events: [
+      { day: 1, date: "Mar 28", title: "Arrival", theme: "Quiet entrance",
+        events: [
+          { id: "k1", time: "14h00", title: "Aman Kyoto check-in", sub: "Hidden valley · onsen suite", detail: "Ms. Tanaka greets you at the gate. Your suite has the tub overlooking the moss garden — the one you asked for after Tokyo.", dress: "Travel ease — kimono is provided.", locked: true, votes: { chloe: 1, yuki: 1, iris: 1 } },
+          { id: "k2", time: "19h30", title: "Kaiseki, in-suite", sub: "Ten courses, one night", detail: "Chef Kenta — formerly Kikunoi, now Aman. The plum wine is from his mother's tree.", dress: "Yukata.", locked: true, votes: { chloe: 1, yuki: 1, iris: 1 } },
+        ] },
+      { day: 2, date: "Mar 29", title: "Temples & teahouses", theme: "Walking days",
+        events: [
+          { id: "k3", time: "06h30", title: "Kennin-ji at dawn", sub: "Private entry", detail: "Before the gates open. Iris cried. You voice-noted the walking-back.", dress: "Layered. Cold for spring.", locked: false, votes: { chloe: 1, iris: 1 } },
+          { id: "k4", time: "12h00", title: "Lunch at Hyotei", sub: "400 years old", detail: "Their morning porridge set. The duck-egg moment.", dress: "Day silk.", locked: false, votes: { chloe: 1, yuki: 1, iris: 1 } },
+          { id: "k5", time: "16h00", title: "Yuki's atelier visit", sub: "Yuki's friend, ceramicist", detail: "Tea bowls being fired. Yuki bought three. You bought one.", dress: "Whatever you wore at lunch.", locked: false, votes: { chloe: 1, yuki: 1 } },
+        ] },
+      { day: 3, date: "Mar 30", title: "Iris's birthday", theme: "The reason we came",
+        events: [
+          { id: "k6", time: "11h00", title: "Sakura at Maruyama", sub: "Peak bloom · private guide", detail: "Cherry blossoms at full. The picnic Margaux ordered didn't arrive — you ate Lawson onigiri instead. Better.", dress: "Pink, naturally.", locked: false, votes: { chloe: 1, iris: 1, yuki: 1 } },
+          { id: "k7", time: "20h00", title: "Iris's dinner — Roan Kikunoi", sub: "Two-Michelin", detail: "Iris's toast. Yuki gave her the bowl from the atelier. The voice note from this night is the one you saved.", dress: "Best of the trip.", locked: true, votes: { chloe: 1, iris: 1, yuki: 1 } },
+        ] },
+      { day: 4, date: "Apr 1", title: "Slow", theme: "After the peak",
+        events: [
+          { id: "k8", time: "10h00", title: "Onsen morning", sub: "No phones rule", detail: "All three of you. Two hours. Nobody spoke for the first thirty.", dress: "Robe.", locked: false, votes: { chloe: 1, iris: 1, yuki: 1 } },
+          { id: "k9", time: "15h00", title: "Tea ceremony · private", sub: "Master Kobayashi", detail: "Iris asked the question about hosting. His answer is what you titled the voice note.", dress: "Plain, simple.", locked: false, votes: { chloe: 1, iris: 1 } },
+        ] },
+      { day: 5, date: "Apr 2", title: "Kinosaki side trip", theme: "Bonus day",
+        events: [
+          { id: "k10", time: "09h00", title: "Train to Kinosaki Onsen", sub: "Two hours · private car", detail: "The seven baths. Yuki's idea. Worth it.", dress: "Comfortable.", locked: false, votes: { yuki: 1, chloe: 1 } },
+          { id: "k11", time: "20h00", title: "Crab kaiseki", sub: "Snow crab season's tail", detail: "The last of the matsuba crab. You'll think about this one in July.", dress: "Yukata.", locked: false, votes: { chloe: 1, yuki: 1, iris: 1 } },
+        ] },
+      { day: 6, date: "Apr 3", title: "Departure", theme: "Slow goodbye",
+        events: [
+          { id: "k12", time: "11h00", title: "Final tea, garden", sub: "The three of you", detail: "Tanaka brought matcha and a single white peach. Iris promised she'd host the next one.", dress: "Travel.", locked: false, votes: { chloe: 1, iris: 1, yuki: 1 } },
+        ] },
+    ],
   },
   {
     id: "amalfi",
@@ -110,7 +142,32 @@ const TRIPS = [
     coverGrad: "linear-gradient(135deg, #4A2A1A 0%, #B07050 70%, #EDD0A0 100%)",
     status: "past",
     role: "guest",
+    guests: ["chloe", "noor", "yuki", "aria"],
     note: "Noor's birthday. Three nights. Perfect.",
+    events: [
+      { day: 1, date: "Jan 22", title: "Arrival", theme: "The riad opens",
+        events: [
+          { id: "m1", time: "16h00", title: "Riad Yima check-in", sub: "Noor's choice · Medina", detail: "Hassan at the gate, the courtyard pool, the smell of orange blossom. Noor handed everyone a key in a different colour.", dress: "Travel ease — but bring a scarf.", locked: true, votes: { chloe: 1, noor: 1, yuki: 1, aria: 1 } },
+          { id: "m2", time: "19h00", title: "Welcome on the rooftop", sub: "Sunset over the souks", detail: "Mint tea, then champagne. The call to prayer started exactly when Noor poured.", dress: "Caftan, jewelry, kohl.", locked: true, votes: { chloe: 1, noor: 1, yuki: 1, aria: 1 } },
+        ] },
+      { day: 2, date: "Jan 23", title: "The medina", theme: "Three colours of saffron",
+        events: [
+          { id: "m3", time: "10h00", title: "Souk walk · private guide", sub: "Yasmine — antiques only", detail: "Aria found the Berber rug. You bought two leather pouffes. The voice note about saffron is from this hour.", dress: "Walkable, sandals.", locked: false, votes: { chloe: 1, aria: 1, noor: 1 } },
+          { id: "m4", time: "14h00", title: "Lunch · Le Jardin", sub: "Hidden garden restaurant", detail: "Pastilla, harira, the rosewater dessert. Yuki sketched the bird in the bougainvillea.", dress: "Light layers — it gets warm.", locked: false, votes: { chloe: 1, aria: 1, yuki: 1, noor: 1 } },
+          { id: "m5", time: "20h30", title: "Noor's birthday · Dar Yacout", sub: "Twelve courses", detail: "Noor wore the red. The mechoui lamb. The rose-petal procession around the pool. The voice note Yuki recorded — 'I want to be the kind of friend you call from the airport.'", dress: "Your most.", locked: true, votes: { chloe: 1, noor: 1, yuki: 1, aria: 1 } },
+        ] },
+      { day: 3, date: "Jan 24", title: "Atlas day", theme: "Out of the city",
+        events: [
+          { id: "m6", time: "08h00", title: "Drive to Ourika Valley", sub: "Two hours · private car", detail: "Snow on the High Atlas. You stopped twice for photographs.", dress: "Layered — it's cold up there.", locked: false, votes: { chloe: 1, noor: 1, aria: 1 } },
+          { id: "m7", time: "12h30", title: "Berber lunch · Kasbah Bab Ourika", sub: "Tagine, on the terrace", detail: "Eagles overhead. Aria asked the question that became Yuki's whole next painting.", dress: "Warm.", locked: false, votes: { chloe: 1, aria: 1, noor: 1, yuki: 1 } },
+          { id: "m8", time: "19h00", title: "Hammam at La Mamounia", sub: "Two hours, all four", detail: "Black soap, rasul clay, then mint tea on the day beds. Nobody spoke afterwards.", dress: "Robe.", locked: true, votes: { chloe: 1, noor: 1, yuki: 1, aria: 1 } },
+        ] },
+      { day: 4, date: "Jan 25", title: "Departure", theme: "One last walk",
+        events: [
+          { id: "m9", time: "09h00", title: "Breakfast · the riad terrace", sub: "Last morning", detail: "Pomegranate, msemen, thick coffee. Noor cried a little. So did you.", dress: "Travel.", locked: false, votes: { chloe: 1, noor: 1, yuki: 1, aria: 1 } },
+          { id: "m10", time: "13h00", title: "Departure · RAK", sub: "Private terminal", detail: "Hassan packed a bag of orange-blossom water for each of you.", dress: "Travel.", locked: true, votes: { chloe: 1, noor: 1, yuki: 1, aria: 1 } },
+        ] },
+    ],
   },
 ];
 
