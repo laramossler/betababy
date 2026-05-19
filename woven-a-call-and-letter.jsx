@@ -8,30 +8,32 @@ const { SC, Mono, Rule, Btn, Tag, Ini, Dot } = window.ATOMS;
 const { MargauxAvatar, LaraAvatar, Waveform, useTypewriter, usePressHoldMic } = window.WOVEN_SHARED;
 const { useState, useEffect, useRef } = React;
 
-// ─── Call beats (verbatim from README) ────────────────────
+// ─── Call beats — concierge confirming an imminent trip ───
+// Today is May 19; Rome is May 26–30. Lara has been planning for weeks,
+// Margaux is locking the last unknowns before tonight.
 const CALL_BEATS = [
   {
-    id: "rome_why",
-    line: "Hello, Chloe. Lara introduced us — Rome, in eight weeks. I'd like five minutes. Tell me what you're chasing there.",
-    chips: ["long lunches", "out of season", "alone, mostly", "the food"],
-    multi: false,
-  },
-  {
     id: "rome_when",
-    line: "Beautiful. Eight weeks lands in July — hot for the Borghese. I'd push you to the week of the 13th, or earlier. Five nights, or longer than that?",
-    chips: ["three nights", "five", "a full week", "you tell me"],
+    line: "Chloe — Margaux. Rome's a week away. I've held the de Russie Tuesday through Saturday. Confirm the dates, or are we moving?",
+    chips: ["tuesday–saturday is right", "shift by a day", "add a night", "let me check"],
     multi: false,
   },
   {
     id: "rome_who",
-    line: "And it's the four of you again — Sophia, Aria, Noor — or just you?",
-    chips: ["just me", "with Aria", "the whole table", "I'm not sure yet"],
+    line: "And who's in the room. Still you and Aria, or has Sophia confirmed?",
+    chips: ["me and aria", "the four of us", "just me", "still moving"],
+    multi: false,
+  },
+  {
+    id: "rome_why",
+    line: "One thing that has to happen — Roscioli at the counter, Aroma at sunset, a Borghese morning. Pick one so I don't lose it in the noise.",
+    chips: ["roscioli, the counter", "aroma, sunset", "borghese, early", "you tell me"],
     multi: false,
   },
   {
     id: "year_tones",
-    line: "Last thing. Three words for how you want this year to feel. Don't think.",
-    chips: ["still", "well-fed", "with old friends", "alone in galleries", "no schedule", "out of season"],
+    line: "Last. Three words for the trip itself. Don't think.",
+    chips: ["still", "well-fed", "long lunches", "alone in galleries", "no schedule", "out of season"],
     multi: true,
     max: 3,
   },
@@ -83,7 +85,7 @@ function Cover({ next }) {
       </div>
       <div style={{ opacity: stage >= 2 ? 1 : 0, transition: "opacity 0.9s ease 0.2s", marginTop: 40, maxWidth: 280 }}>
         <p style={{ fontFamily: F.body, fontSize: 15, color: C.creamSoft, fontStyle: "italic", lineHeight: 1.7, fontWeight: 300 }}>
-          One first sitting.<br/>Margaux will call.
+          Rome is in a week.<br/>Margaux is calling to lock the last things.
         </p>
       </div>
       <div style={{ position: "absolute", bottom: 80, left: 28, right: 28, opacity: stage >= 3 ? 1 : 0, transition: "opacity 0.8s ease" }}>
@@ -295,7 +297,7 @@ function CallBeat({ beatIdx, beat, capture, onComplete }) {
 // ─── 15 · CALL SIGNOFF ────────────────────────────────────
 function CallSignoff({ onLetter }) {
   const [stage, setStage] = useState(0);
-  const { out, done } = useTypewriter("Thank you. I have what I need. Lara wants to send you something — keep an eye on the next screen.", 22);
+  const { out, done } = useTypewriter("Good. That's what I needed. Lara wants a last word before I lock — let me bring her in.", 22);
   useEffect(() => {
     if (!done) return;
     const a = setTimeout(() => setStage(1), 700);
@@ -335,7 +337,7 @@ function CallSignoff({ onLetter }) {
             <div>
               <SC color={C.gold} size={8}>Lara · via Margaux</SC>
               <p style={{ fontFamily: F.body, fontSize: 12.5, color: C.creamSoft, fontStyle: "italic", fontWeight: 300, marginTop: 2 }}>
-                A short list. Six places I know in Rome.
+                A last look at the six. Confirm before Margaux locks.
               </p>
             </div>
           </div>
@@ -365,9 +367,9 @@ function LetterIntro({ onShortlist }) {
       </h1>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 14, fontFamily: F.body, fontSize: 15.5, color: C.creamSoft, fontStyle: "italic", fontWeight: 300, lineHeight: 1.7 }}>
-        <p>I've been to Rome thirty-something times. The list of places I love is long; the list I'd send a friend without thinking is short.</p>
-        <p>Margaux passed me the four notes from your call. Here are six places, drawn from a notebook of thirty-three. Some you'll know. Some I hope you won't.</p>
-        <p>Keep what pulls at you. Tell me what doesn't. She'll build your days from what's left.</p>
+        <p>You've seen these. I want them on paper before Margaux locks tonight.</p>
+        <p>Six places from the notebook. Tables held since last week. Tell her what stays — flip anything that lost its pull.</p>
+        <p>And if any of them feel wrong now, we cut without ceremony.</p>
       </div>
 
       <p style={{ fontFamily: F.display, fontSize: 22, color: C.gold, fontStyle: "italic", marginTop: 24 }}>
@@ -376,7 +378,7 @@ function LetterIntro({ onShortlist }) {
 
       <div style={{ flex: 1 }} />
 
-      <Btn full onClick={onShortlist}>See the six</Btn>
+      <Btn full onClick={onShortlist}>Confirm the six</Btn>
     </div>
   );
 }
@@ -388,13 +390,13 @@ function Shortlist({ verdicts, setVerdicts, onPlanner }) {
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: "70px 22px 30px" }}>
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 6 }}>
-        <SC color={C.gold} size={9}>Lara's six</SC>
+        <SC color={C.gold} size={9}>Lara's six · held</SC>
         <span style={{ fontFamily: F.mono, fontSize: 10, color: C.stone, letterSpacing: 1 }}>
           {String(reviewed).padStart(2, "0")} / 06
         </span>
       </div>
       <h1 style={{ fontFamily: F.display, fontSize: 24, color: C.cream, fontWeight: 400, fontStyle: "italic", lineHeight: 1.15, marginBottom: 18 }}>
-        Keep. Skip. More like it.
+        Confirm. Flip what changed.
       </h1>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -452,11 +454,11 @@ function Shortlist({ verdicts, setVerdicts, onPlanner }) {
       </div>
 
       <div style={{ marginTop: 22 }}>
-        <Btn full onClick={onPlanner} primary={reviewed > 0} style={{ opacity: reviewed > 0 ? 1 : 0.55 }}>
-          {reviewed === 6 ? "Build my days" : reviewed > 0 ? `Build my days · ${reviewed} reviewed` : "Build my days"}
+        <Btn full onClick={onPlanner}>
+          Lock the six · review the days
         </Btn>
         <p style={{ fontFamily: F.body, fontSize: 12, color: C.stone, fontStyle: "italic", fontWeight: 300, marginTop: 10, textAlign: "center" }}>
-          Margaux works with whatever signal she has.
+          All six are kept by default. Flip any to skip — Margaux moves around it.
         </p>
       </div>
     </div>

@@ -8,13 +8,14 @@ const { RomeMap } = window.WOVEN_SHARED;
 const { useState, useMemo } = React;
 
 // ─── Constants ────────────────────────────────────────────
-// README: placeholder dates — Jul 13–17.
+// Rome is May 26–30 — seven days from today's May 19. Margaux held the
+// de Russie Tue–Sat; this is the locked draft Chloe reviews.
 const DAYS = [
-  { idx: 0, weekday: "Mon", date: "Jul 13", color: C.blush },
-  { idx: 1, weekday: "Tue", date: "Jul 14", color: C.gold },
-  { idx: 2, weekday: "Wed", date: "Jul 15", color: C.sage },
-  { idx: 3, weekday: "Thu", date: "Jul 16", color: C.dusk },
-  { idx: 4, weekday: "Fri", date: "Jul 17", color: C.sea },
+  { idx: 0, weekday: "Tue", date: "May 26", color: C.blush },
+  { idx: 1, weekday: "Wed", date: "May 27", color: C.gold },
+  { idx: 2, weekday: "Thu", date: "May 28", color: C.sage },
+  { idx: 3, weekday: "Fri", date: "May 29", color: C.dusk },
+  { idx: 4, weekday: "Sat", date: "May 30", color: C.sea },
 ];
 
 const SLOTS = [
@@ -316,9 +317,9 @@ function DayPlanner({ verdicts, planOverrides, setOverride, onFinalise }) {
     <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: "62px 0 30px", position: "relative" }}>
       <div style={{ padding: "0 22px 14px", display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
         <div>
-          <SC color={C.gold} size={9}>Rome · five days</SC>
+          <SC color={C.gold} size={9}>Rome · seven days out</SC>
           <h1 style={{ fontFamily: F.display, fontSize: 22, color: C.cream, fontWeight: 400, fontStyle: "italic", marginTop: 4, lineHeight: 1.15 }}>
-            Margaux's draft.
+            The locked draft.
           </h1>
         </div>
         <div style={{ display: "flex", gap: 4 }}>
@@ -375,9 +376,9 @@ function DayPlanner({ verdicts, planOverrides, setOverride, onFinalise }) {
       </div>
 
       <div style={{ padding: "0 22px" }}>
-        <Btn full onClick={onFinalise}>Margaux · finalise Rome</Btn>
+        <Btn full onClick={onFinalise}>Lock the week</Btn>
         <p style={{ fontFamily: F.body, fontSize: 12, color: C.stone, fontStyle: "italic", fontWeight: 300, textAlign: "center", marginTop: 8 }}>
-          She'll handle reservations · addresses · openings · timing.
+          Reservations confirmed at midnight Rome time tonight.
         </p>
       </div>
 
@@ -425,14 +426,14 @@ function Drafted({ verdicts, planOverrides, captures, onEnterLedger }) {
       <div style={{ position: "absolute", inset: 0, background: `radial-gradient(ellipse at center, ${C.gold}10 0%, transparent 60%)`, pointerEvents: "none" }} />
 
       <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", textAlign: "center" }}>
-        <SC color={C.gold} size={9}>Drafted</SC>
+        <SC color={C.gold} size={9}>Locked</SC>
         <h1 style={{ fontFamily: F.display, fontSize: 30, color: C.cream, fontWeight: 400, fontStyle: "italic", marginTop: 10, lineHeight: 1.1 }}>
-          Rome · Jul 13–17
+          Rome · May 26 – 30
         </h1>
         <p style={{ fontFamily: F.body, fontSize: 14, color: C.creamSoft, fontStyle: "italic", fontWeight: 300, marginTop: 14, lineHeight: 1.6, maxWidth: 290, marginLeft: "auto", marginRight: "auto" }}>
           {totalKept} kept from Lara's six.<br/>
-          {totalPlaces} places across five days.<br/>
-          Margaux is calling Roscioli at midnight Rome time.
+          {totalPlaces} reservations confirmed across five days.<br/>
+          The folder will be with you Monday morning.
         </p>
 
         {!!tones.length && (
@@ -448,7 +449,7 @@ function Drafted({ verdicts, planOverrides, captures, onEnterLedger }) {
         <div style={{ marginTop: 28, padding: "14px 14px", background: C.card, border: `0.5px solid ${C.border}`, borderLeft: `1.5px solid ${C.blush}`, textAlign: "left", maxWidth: 320, width: "100%", marginLeft: "auto", marginRight: "auto" }}>
           <SC color={C.blush} size={8}>Margaux</SC>
           <p style={{ fontFamily: F.body, fontSize: 13, color: C.creamSoft, fontStyle: "italic", fontWeight: 300, marginTop: 6, lineHeight: 1.55 }}>
-            "I'll have reservations and a courier-confirmed address book to you by Friday. You'll see them appear in the ledger as I clear them."
+            "Sleep well. I'll clear the holds overnight and have the courier on your doorstep with the folder before you fly Tuesday."
           </p>
         </div>
       </div>

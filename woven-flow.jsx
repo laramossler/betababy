@@ -10,11 +10,16 @@ const { useState: wfState, useEffect: wfEffect, useCallback: wfCb } = React;
 
 const FLOW_KEY = "ledger.first-sitting.v1";
 
+// All six picks are pre-kept — Lara held the tables last week. Chloe's
+// job at the shortlist is to flip what changed her mind, not to start from
+// blank.
+const DEFAULT_VERDICTS = { p1: "keep", p2: "keep", p3: "keep", p4: "keep", p5: "keep", p6: "keep" };
+
 const EMPTY_STATE = {
   phase: "cover",
   beatIdx: 0,
   captures: {},          // beatId -> { chips, voice }
-  verdicts: {},          // pickId -> 'keep' | 'more' | 'skip'
+  verdicts: { ...DEFAULT_VERDICTS },
   planOverrides: {},     // 'dayIdx-slotId' -> entry | null
   completed: false,
 };

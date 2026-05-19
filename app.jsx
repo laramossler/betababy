@@ -84,21 +84,31 @@ function applyFromFlow(flow) {
   const totalPlaces = DAYS.reduce((acc, d) => acc + SLOTS.filter(s => !!getEntry(d.idx, s.id)).length, 0);
   const keptCount = Object.values(verdicts).filter(v => v === "keep" || v === "more").length;
 
+  const romeGuests = ["chloe"];
+  if (who.includes("me and aria") || who.includes("with aria")) romeGuests.push("aria");
+  if (who.includes("the four of us") || who.includes("the whole table")) romeGuests.push("aria", "sophia", "noor");
+
   const romeTrip = {
-    id: "rome_jul",
+    id: "rome_may",
     title: "Rome",
-    sub: "Margaux is drafting",
-    dates: "Jul 13 — 17, 2026",
-    daysOut: 0,
+    sub: "Locked · the de Russie",
+    dates: "May 26 — 30, 2026",
+    daysOut: 7,
     cover: "#9A8460",
     coverGrad: "linear-gradient(135deg, #2A1815 0%, #6A4F3A 50%, #B8A07A 100%)",
-    status: "drafting",
+    status: "active",
     role: who.includes("just me") ? "guest" : "host",
-    guests: ["chloe"],
-    note: `${keptCount} kept from Lara's six · ${totalPlaces} places across five days`,
+    guests: romeGuests,
+    note: `${keptCount} kept · ${totalPlaces} reservations confirmed`,
     tones,
     capturedAt: new Date().toISOString(),
   };
+
+  // Demote any seed trip currently marked "active" (Riviera) — today is
+  // May 19; Riviera was May 12–17, so it belongs in past.
+  for (const trip of window.LEDGER.TRIPS) {
+    if (trip.status === "active") trip.status = "past";
+  }
   window.LEDGER.TRIPS.unshift(romeTrip);
   window.LEDGER.ROME = {
     trip: romeTrip,
@@ -110,13 +120,14 @@ function applyFromFlow(flow) {
 
   const thread = window.LEDGER.CONCIERGE_THREAD;
   thread.length = 0;
-  thread.push({ from: "margaux", time: "Today, just now", body: "Thank you for the call. Quick recap so you've got the same notes I do." });
-  if (why.length) thread.push({ from: "margaux", time: "Today, just now", body: `Rome — chasing ${why.join(", ")}.` });
-  if (when.length) thread.push({ from: "margaux", time: "Today, just now", body: `${when[0]}, week of the 13th of July.` });
-  if (who.length) thread.push({ from: "margaux", time: "Today, just now", body: `Who: ${who[0]}.` });
-  if (tones.length) thread.push({ from: "margaux", time: "Today, just now", body: `The year, in three words: ${tones.join(" · ")}.` });
-  thread.push({ from: "margaux", time: "Today, just now", body: `I've laid your five days against Lara's picks. ${keptCount} kept, ${totalPlaces} slots filled. Reservations confirmed in the ledger as I clear them.` });
-  thread.push({ from: "me", time: "Today, just now", body: "Thank you." });
+  thread.push({ from: "margaux", time: "Today, just now", body: "Good talking. Locking now so we both have the same notes." });
+  if (when.length) thread.push({ from: "margaux", time: "Today, just now", body: `Dates: ${when[0]}. The de Russie holds through Saturday.` });
+  if (who.length) thread.push({ from: "margaux", time: "Today, just now", body: `In the room: ${who[0]}.` });
+  if (why.length) thread.push({ from: "margaux", time: "Today, just now", body: `The non-negotiable: ${why[0]}. Held.` });
+  if (tones.length) thread.push({ from: "margaux", time: "Today, just now", body: `Trip tones — ${tones.join(" · ")}. Noted.` });
+  thread.push({ from: "margaux", time: "Today, just now", body: `${keptCount} of Lara's six confirmed. ${totalPlaces} reservations clearing at midnight Rome time.` });
+  thread.push({ from: "margaux", time: "Today, just now", body: "Courier with the folder on your doorstep before Tuesday's flight. Sleep well." });
+  thread.push({ from: "me", time: "Today, just now", body: "Thank you, Margaux." });
 
   window.LEDGER.ME.tones = tones;
 }
@@ -126,7 +137,7 @@ applyFromFlow(INITIAL_FLOW);
 
 function App() {
   const [screen, setScreen] = useState("home");
-  const [tripId, setTripId] = useState(window.LEDGER.TRIPS[0]?.id || "rome_jul");
+  const [tripId, setTripId] = useState(window.LEDGER.TRIPS[0]?.id || "rome_may");
   const [plan, setPlan] = useState(window.LEDGER.WEEK);
   const [dynamicTrips, setDynamicTrips] = useState([]);
   const [t, setTweak] = window.useTweaks ? window.useTweaks(TWEAK_DEFAULTS) : [TWEAK_DEFAULTS, () => {}];
@@ -136,7 +147,7 @@ function App() {
 
   const onFinalise = (flow) => {
     applyFromFlow(flow);
-    setTripId(window.LEDGER.TRIPS[0]?.id || "rome_jul");
+    setTripId(window.LEDGER.TRIPS[0]?.id || "rome_may");
     setDone(true);
     setScreen("home");
   };
