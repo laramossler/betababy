@@ -2,163 +2,173 @@
 
 This directory holds:
 
-- `migrations/20260519000000_initial.sql` — full schema (profiles, trips,
-  forwarded_items, inbox_routes, user_wants, feedback_notes) + RLS
-  policies that scope every row to `auth.uid()`.
-- `functions/parse-email/` — authenticated edge function the frontend
-  calls to paste-and-parse a forwarded email.
-- `functions/parse-inbound-email/` — webhook target for Postmark
-  Inbound. Uses the service role to bypass RLS so it can write to any
-  user's rows based on the inbox routing table.
+- `migrations/20260519000000_initial.sql` — main schema (profiles,
+  trips, forwarded_items, inbox_routes, user_wants, feedback_notes) +
+  RLS policies that scope every row to `auth.uid()`.
+- `migrations/20260520000000_keys_table.sql` — *optional* keys table +
+  provision_key helper. Only needed if you turn on the multi-key-per-user
+  flow (see bottom of this README).
+- `functions/parse-email/` — *optional* authenticated edge function the
+  frontend calls to paste-and-parse a forwarded email.
+- `functions/parse-inbound-email/` — *optional* webhook target for
+  Postmark Inbound. Routes incoming mail to the right trip.
+- `functions/exchange-key/` — *optional* used only by the multi-key flow.
 - `config.toml` — function-level JWT verification flags.
 
-## One-time setup
+## What's required vs optional
+
+**Required for login + first trip + persistence:**
+- The Supabase project (URL + anon key in `supabase-config.js`)
+- The main schema migration
+- That's it — no CLI, no edge functions, no secrets
+
+**Optional for the email parsing layer** (paste-an-email + real
+forwarded mail): the two `parse-*` edge functions + Postmark.
+
+**Optional for multi-key-per-user**: the `keys` migration +
+`exchange-key` edge function.
+
+## Required setup (5 minutes, no CLI)
 
 You need:
-
 - A Supabase project — create at https://supabase.com/dashboard
-- An Anthropic API key (`sk-ant-…`)
-- A Postmark account with an Inbound Stream (for live email forwarding)
-- Supabase CLI: `brew install supabase/tap/supabase` (or see docs)
 
-### 1. Link the local project to your Supabase instance
+### 1. Push the schema
+
+Open SQL Editor in the dashboard → New query → paste the contents of
+`migrations/20260519000000_initial.sql` → Run.
+
+### 2. Turn off self-signup
+
+Authentication → Sign In / Up → Email → toggle **"Allow new users to
+sign up"** off. Only Lara-provisioned users will be able to sign in.
+
+### 3. Drop the URL + anon key into the app
+
+Edit `supabase-config.js` in the repo root and set both values from
+your project's Settings → API page.
+
+## Optional setup — email parsing layer
+
+(Only do this when you're ready to forward real bookings or use the
+"paste an email" debug surface.)
+
+You'll need:
+- An Anthropic API key (`sk-ant-…`)
+- A Postmark account with an Inbound Stream (for live forwarding)
+- The Supabase CLI: `brew install supabase/tap/supabase`
 
 ```bash
 supabase link --project-ref <your-project-ref>
-```
-
-Project ref is the part before `.supabase.co` in your project URL.
-
-### 2. Push the schema
-
-```bash
-supabase db push
-```
-
-Or — easier first time — open the SQL Editor in the dashboard and paste
-the contents of `migrations/20260519000000_initial.sql`.
-
-### 3. Set function secrets
-
-```bash
 supabase secrets set ANTHROPIC_API_KEY=sk-ant-...
 supabase secrets set INBOUND_SECRET=$(openssl rand -hex 24)
-```
-
-Save the `INBOUND_SECRET` value somewhere — you'll paste it into the
-Postmark webhook URL in step 5.
-
-### 4. Deploy the edge functions
-
-```bash
 supabase functions deploy parse-email
 supabase functions deploy parse-inbound-email --no-verify-jwt
 ```
 
 ### 5. Wire up Postmark Inbound
 
-In the Postmark dashboard:
+Then in the Postmark dashboard:
 
-1. Create a server, then a "Inbound Stream"
-2. Note the inbound address it gives you, e.g. `<hash>@inbound.postmarkapp.com`
-3. Set up DNS: add an MX record on your domain pointing to
-   `inbound.postmarkapp.com` (priority 10). Postmark's docs walk through
-   this; the setup page checks your records live.
-4. Set the **Webhook URL** to:
+1. Create a server, then an "Inbound Stream"
+2. Set up DNS: add an MX record on your inbox domain pointing to
+   `inbound.postmarkapp.com` (priority 10). Postmark's setup page
+   verifies the records.
+3. Set the **Webhook URL** to:
 
    ```
    https://<project-ref>.functions.supabase.co/parse-inbound-email?secret=<INBOUND_SECRET>
    ```
 
-5. Send a test email from the Postmark Inbound page. Within seconds it
-   should appear in the `forwarded_items` table if (and only if) the
-   recipient address has a matching row in `inbox_routes` for that
-   user/trip.
+4. Send a test email from the Postmark Inbound page. Within seconds it
+   should land in the `forwarded_items` table (if the recipient
+   address has a matching `inbox_routes` row for that user/trip).
 
-Once that's working, real emails forwarded to
-`chloe.rome.<tag>@<your-domain>` (where your domain has the MX record
-pointing at Postmark) will land in the user's trip.
+## Deploying the frontend
 
-### 6. Wire up the frontend
+The static files (`index.html` + the `mvp-*.jsx` modules) host anywhere
+that serves static content. Three free options ordered by friction:
 
-In `index.html` or `supabase-config.js`, set:
-
-```js
-window.SUPABASE_URL = "https://<project-ref>.supabase.co";
-window.SUPABASE_ANON_KEY = "<anon-key from project settings>";
+**Vercel — fastest** (CLI, 60 seconds):
+```bash
+cd <repo root>
+npx vercel
 ```
+Follow the prompts (defaults are fine). At the end it prints a URL like
+`https://betababy-xxx.vercel.app`. Subsequent pushes redeploy
+automatically once you link the repo.
 
-The anon key is safe to expose — RLS protects the data.
+**Cloudflare Pages** (git-driven, no CLI):
+1. Cloudflare dashboard → Workers & Pages → Create application → Pages
+2. Connect to your GitHub repo
+3. Build settings: no build command, output directory `/`
+4. Deploy
 
-### 7. (Optional) Customise the auth email
+**Netlify** (drag-and-drop, no CLI):
+1. netlify.com → drop the repo folder onto the upload zone
+2. Done
 
-Supabase sends magic links from `noreply@mail.supabase.io` by default —
-fine for testing. To send from your own domain, configure SMTP in
-Authentication → Settings (Resend, Postmark Transactional, or any
-provider).
+After deploy you've got a real URL. Share invites as
+`https://your-deploy-url/?k=<the-key>`.
 
 ## Provisioning users (URL-as-credential)
 
 Users never see a sign-in screen — Lara hands them a URL like
-`https://theledger.app/?k=chloe-iphone-7f3k9p` and they're in. Each
-URL key maps to one Supabase user; a user can have **many keys** (one
-per device, a temp loaner, etc.) and any of them lands you in the same
-account with the same data.
+`https://theledger.app/?k=chloe-7f3k9p` and they're in. No edge function,
+no CLI, no email step.
 
-### Add a new user
+### Add a person
 
-1. **Create the auth user** — Supabase dashboard → Authentication →
-   Users → "Add user → Create new user". Set the email to anything
-   meaningful (`chloe@theledger.app`). Set a random password (it's never
-   used — the URL key replaces it). Tick **Auto Confirm User**.
+1. Decide on a key for them. Long, random-ish, lowercase + hyphens.
+   Examples: `chloe-7f3k9p3q9w`, `lara-test-2k88tt`, `taylor-x7m9p`.
+   The regex is `^[a-z0-9][a-z0-9-]{6,127}$`.
 
-2. **Provision a key** — SQL Editor → New query, run:
-
-   ```sql
-   select public.provision_key('chloe@theledger.app', 'chloe-iphone-7f3k9p', 'Chloe · iPhone');
-   ```
-
-   - First arg: the user's email (must already exist in `auth.users`)
-   - Second arg: the URL key (lowercase, hyphens; the regex is
-     `^[a-z0-9][a-z0-9-]{6,127}$`)
-   - Third arg: a label for your own bookkeeping (optional)
+2. **Authentication → Users → "Add user → Create new user"**
+   - Email: `<key>@theledger.app` (e.g. `chloe-7f3k9p3q9w@theledger.app`)
+   - Password: same as the key (e.g. `chloe-7f3k9p3q9w`)
+   - **Tick "Auto Confirm User"** — critical, otherwise sign-in won't work
 
 3. **Send the URL** out of band — Signal, iMessage, whatever:
 
    ```
-   https://theledger.app/?k=chloe-iphone-7f3k9p
+   https://your-app-url/?k=chloe-7f3k9p3q9w
    ```
 
-### Issue additional keys for the same user
+That's it. They click; URL strips; they land on Welcome. Their session
+persists in localStorage; subsequent visits don't need the URL.
 
-Just call `provision_key` again with a different key string:
+### Revoke access
 
-```sql
-select public.provision_key('chloe@theledger.app', 'chloe-laptop-mb22qa', 'Chloe · MacBook');
-select public.provision_key('chloe@theledger.app', 'chloe-temp-zk88tt',    'Chloe · loaner from Tokyo');
-```
+Authentication → Users → click the user → "Delete user". Their session
+on any device fails on next refresh (within ~1 hour).
 
-All three URLs land in Chloe's account. Same data, same forwarded items,
-same trips.
-
-### Revoke a key
+Or to keep their data but cut access:
 
 ```sql
-delete from public.keys where key = 'chloe-temp-zk88tt';
+update auth.users set encrypted_password = null where email = 'chloe-7f3k9p3q9w@theledger.app';
 ```
 
-Any device already signed in via that key keeps its current session
-until it expires (Supabase default: 1 hour for access tokens, 7 days for
-refresh tokens). After that, refresh fails and the user lands on the
-"don't recognise that link" screen.
+### See who's signed in
 
-### See what's been used
+Authentication → Users shows `last_sign_in_at` for each. Or query:
 
 ```sql
-select key, label, last_used_at, created_at
-from public.keys
-order by coalesce(last_used_at, created_at) desc;
+select email, last_sign_in_at from auth.users order by last_sign_in_at desc nulls last;
 ```
+
+### A note on multi-device
+
+Same key works on as many devices as the person opens the URL on. Each
+device gets its own session (stored in its own localStorage) but they
+all point at the same account and see the same trips.
+
+### A note on "multiple keys per user"
+
+This simpler setup is one-key-per-user (since the key is the password).
+If you need multiple keys for the same person (e.g. a recoverable
+"backup" link), you'd add the `keys` table + `exchange-key` edge
+function back — the migration and function code are still in this repo
+but unused by default.
 
 ## Local development
 

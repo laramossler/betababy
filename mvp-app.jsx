@@ -174,13 +174,22 @@ const RESUMABLE = new Set(["you", "trip", "companions", "forward", "home", "deta
 
 // ─── Auth via opaque URL key ─────────────────────────────────
 // Lara hands out a URL like /?k=chloe-7f3k9p. The client extracts the
-// key, stashes it locally, strips it from the URL, and exchanges it
-// with the exchange-key edge function for a Supabase session. The user
-// never sees the key. Multiple keys can point at the same user (one per
-// device, one for a guest, one for a temp link, etc.) — each just lands
-// you in the same account.
+// key, stashes it locally, strips it from the URL, and signs in to
+// Supabase with the key as the password (against a synthetic email
+// derived from the key). The user never sees the key.
+//
+// No edge function involved — Supabase Auth's signInWithPassword handles
+// everything. Lara provisions each user via the Auth dashboard:
+//   email:    <key>@theledger.app
+//   password: <key>
+//   auto-confirm: yes
+//
+// To prevent random visitors from creating accounts, disable signup in
+// Supabase: Authentication → Sign In / Up → Email → toggle off "Allow
+// new users to sign up".
 const KEY_RE = /^[a-z0-9][a-z0-9-]{6,127}$/i;
 const KEY_STORE = "ledger.urlkey";
+const KEY_EMAIL_DOMAIN = window.LEDGER_KEY_DOMAIN || "theledger.app";
 
 function readKeyFromURL() {
   const k = new URLSearchParams(window.location.search).get("k");
@@ -196,24 +205,16 @@ function loadStoredKey() {
 function clearStoredKey() { try { localStorage.removeItem(KEY_STORE); } catch {} }
 
 async function exchangeKey(key) {
-  if (!key || !SUPABASE_URL || !SUPABASE_ANON_KEY) return { error: "not configured" };
-  try {
-    const res = await fetch(`${SUPABASE_URL}/functions/v1/exchange-key`, {
-      method: "POST",
-      headers: { "content-type": "application/json", "apikey": SUPABASE_ANON_KEY },
-      body: JSON.stringify({ key }),
-    });
-    if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
-      return { error: j.error || `HTTP ${res.status}` };
-    }
-    const { email, token_hash } = await res.json();
-    const { error: otpErr } = await supabase.auth.verifyOtp({ type: "magiclink", token_hash, email });
-    if (otpErr) return { error: otpErr.message };
-    return { ok: true };
-  } catch (e) {
-    return { error: String(e.message || e) };
+  if (!key || !supabase) return { error: "not configured" };
+  const email = `${key}@${KEY_EMAIL_DOMAIN}`;
+  const { error } = await supabase.auth.signInWithPassword({ email, password: key });
+  if (error) {
+    // Normalise the common bad-key errors so NoAccess can show clear copy
+    const msg = (error.message || "").toLowerCase();
+    if (msg.includes("invalid") || msg.includes("not confirmed")) return { error: "unknown key" };
+    return { error: error.message };
   }
+  return { ok: true };
 }
 
 // ─── NoAccess screen — shown when there's no valid key + no session ─
