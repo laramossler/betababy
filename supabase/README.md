@@ -97,6 +97,69 @@ fine for testing. To send from your own domain, configure SMTP in
 Authentication → Settings (Resend, Postmark Transactional, or any
 provider).
 
+## Provisioning users (URL-as-credential)
+
+Users never see a sign-in screen — Lara hands them a URL like
+`https://theledger.app/?k=chloe-iphone-7f3k9p` and they're in. Each
+URL key maps to one Supabase user; a user can have **many keys** (one
+per device, a temp loaner, etc.) and any of them lands you in the same
+account with the same data.
+
+### Add a new user
+
+1. **Create the auth user** — Supabase dashboard → Authentication →
+   Users → "Add user → Create new user". Set the email to anything
+   meaningful (`chloe@theledger.app`). Set a random password (it's never
+   used — the URL key replaces it). Tick **Auto Confirm User**.
+
+2. **Provision a key** — SQL Editor → New query, run:
+
+   ```sql
+   select public.provision_key('chloe@theledger.app', 'chloe-iphone-7f3k9p', 'Chloe · iPhone');
+   ```
+
+   - First arg: the user's email (must already exist in `auth.users`)
+   - Second arg: the URL key (lowercase, hyphens; the regex is
+     `^[a-z0-9][a-z0-9-]{6,127}$`)
+   - Third arg: a label for your own bookkeeping (optional)
+
+3. **Send the URL** out of band — Signal, iMessage, whatever:
+
+   ```
+   https://theledger.app/?k=chloe-iphone-7f3k9p
+   ```
+
+### Issue additional keys for the same user
+
+Just call `provision_key` again with a different key string:
+
+```sql
+select public.provision_key('chloe@theledger.app', 'chloe-laptop-mb22qa', 'Chloe · MacBook');
+select public.provision_key('chloe@theledger.app', 'chloe-temp-zk88tt',    'Chloe · loaner from Tokyo');
+```
+
+All three URLs land in Chloe's account. Same data, same forwarded items,
+same trips.
+
+### Revoke a key
+
+```sql
+delete from public.keys where key = 'chloe-temp-zk88tt';
+```
+
+Any device already signed in via that key keeps its current session
+until it expires (Supabase default: 1 hour for access tokens, 7 days for
+refresh tokens). After that, refresh fails and the user lands on the
+"don't recognise that link" screen.
+
+### See what's been used
+
+```sql
+select key, label, last_used_at, created_at
+from public.keys
+order by coalesce(last_used_at, created_at) desc;
+```
+
 ## Local development
 
 ```bash

@@ -7,3 +7,8 @@ verify_jwt = false
 [functions.parse-email]
 # Frontend-called with the user's JWT; default verification is fine
 verify_jwt = true
+
+[functions.exchange-key]
+# Public — the URL key itself is the credential. Edge function looks
+# the key up via service role; clients never carry a JWT to this one.
+verify_jwt = false
