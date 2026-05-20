@@ -148,8 +148,11 @@ function AuthScreen({ onAuth }) {
         <input
           value={val} onChange={e => { setVal(e.target.value); setErr(""); }}
           onKeyDown={e => e.key === "Enter" && submit()}
-          placeholder="chloe-7f3k9p"
+          placeholder="paste your key"
           autoFocus
+          spellCheck={false}
+          autoCapitalize="none"
+          autoCorrect="off"
           style={{
             fontFamily: F.mono, fontSize: 16, color: C.cream,
             padding: "10px 0 12px", borderBottom: `0.5px solid ${C.borderLight}`,
