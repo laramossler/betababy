@@ -1,0 +1,9 @@
+project_id = "ledger-mvp"
+
+[functions.parse-inbound-email]
+# Postmark needs to call this without a JWT — auth is via ?secret=
+verify_jwt = false
+
+[functions.parse-email]
+# Frontend-called with the user's JWT; default verification is fine
+verify_jwt = true

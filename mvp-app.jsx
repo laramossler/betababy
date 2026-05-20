@@ -1,172 +1,154 @@
-// ─── MVP APP ─ wires the flow into a full-bleed web app ─────
-// - URL-as-credential auth: ?k=… is her account. Stored to localStorage
-//   on first visit. No password, no email step. Lara hands out keys.
-// - Local-first: every change writes to localStorage immediately, then
-//   debounce-syncs to the worker so a new device sees everything.
-// - Mid-flow draft persists — refresh in the middle of "Tell us about
-//   the trip" and she lands back on the same step with the same input.
-// - Wants (placeholder upvotes) and feedback drafts persist too.
+// ─── MVP APP ─ Supabase-backed, magic-link auth ──────────────
+// All data lives in Supabase Postgres. RLS scopes every row to the
+// signed-in user. Frontend talks directly to Supabase via the JS SDK
+// for everything except email parsing, which goes through the
+// `parse-email` edge function so the Anthropic key never leaves the
+// server side.
 
-const { useState, useMemo, useEffect, useCallback, useRef } = React;
+const { useState, useMemo, useEffect, useRef, useCallback } = React;
 const { C, F, Mono, SC, Btn, Welcome, YouStep, TripStep, CompanionsStep, ForwardStep, ReadyStep } = window.MVP;
 const { Home } = window.HOME;
 const { TripDetail } = window.TRIP_DETAIL;
 
-const API_BASE = window.LEDGER_API_BASE || "";
-const STATE_KEY = "ledger.mvp.v2";
-const USERKEY_KEY = "ledger.userKey";
-const FEEDBACK_DRAFT_KEY = "ledger.mvp.feedbackDraft";
+// ─── Supabase client ─────────────────────────────────────────
+const SUPABASE_URL = window.SUPABASE_URL || "";
+const SUPABASE_ANON_KEY = window.SUPABASE_ANON_KEY || "";
+const supabase = window.supabase && SUPABASE_URL && SUPABASE_ANON_KEY
+  ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
+    })
+  : null;
 
-// ─── User-key management ─────────────────────────────────────
-const KEY_RE = /^[a-z0-9][a-z0-9-]{6,63}$/i;
-function readKeyFromURL() {
-  const k = new URLSearchParams(window.location.search).get("k");
-  return k && KEY_RE.test(k) ? k.toLowerCase() : null;
-}
-function loadUserKey() {
-  const fromURL = readKeyFromURL();
-  if (fromURL) {
-    try { window.localStorage.setItem(USERKEY_KEY, fromURL); } catch {}
-    // strip the key from the URL so it doesn't sit in tab history / share sheets
-    try { window.history.replaceState({}, "", window.location.pathname); } catch {}
-    return fromURL;
-  }
-  try { return window.localStorage.getItem(USERKEY_KEY); } catch { return null; }
-}
-function saveUserKey(k) {
-  try { window.localStorage.setItem(USERKEY_KEY, k); } catch {}
-}
-function clearUserKey() {
-  try { window.localStorage.removeItem(USERKEY_KEY); } catch {}
-}
+// ─── localStorage cache (offline-first feel) ──────────────────
+const CACHE_KEY = "ledger.mvp.cache.v1";
+const DRAFT_KEY = "ledger.mvp.draft.v1";
 
-// ─── Local persistence ───────────────────────────────────────
-function loadLocal() {
-  try {
-    const raw = window.localStorage.getItem(STATE_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch { return null; }
-}
-function persistLocal(state) {
-  try { window.localStorage.setItem(STATE_KEY, JSON.stringify(state)); } catch {}
-}
-function clearLocal() {
-  try { window.localStorage.removeItem(STATE_KEY); } catch {}
-  try { window.localStorage.removeItem(FEEDBACK_DRAFT_KEY); } catch {}
-}
+const loadCache = () => { try { return JSON.parse(localStorage.getItem(CACHE_KEY) || "null"); } catch { return null; } };
+const saveCache = (s) => { try { localStorage.setItem(CACHE_KEY, JSON.stringify(s)); } catch {} };
+const clearCache = () => { try { localStorage.removeItem(CACHE_KEY); } catch {} };
 
-// ─── API ─────────────────────────────────────────────────────
-function makeApi(userKey) {
-  const headers = () => ({ "content-type": "application/json", "x-ledger-key": userKey });
+const loadDraft = () => { try { return JSON.parse(localStorage.getItem(DRAFT_KEY) || "null"); } catch { return null; } };
+const saveDraft = (d) => { try { localStorage.setItem(DRAFT_KEY, JSON.stringify(d)); } catch {} };
+const clearDraft = () => { try { localStorage.removeItem(DRAFT_KEY); } catch {} };
+
+// ─── Supabase data layer ─────────────────────────────────────
+// All callers handle a null `supabase` (e.g. when config hasn't been
+// filled in yet) by returning empty/false — the UI degrades to local-only.
+function makeApi(client, userId) {
+  if (!client || !userId) return null;
   return {
-    async fetchState() {
-      try {
-        const r = await fetch(`${API_BASE}/api/state`, { headers: headers() });
-        if (!r.ok) return null;
-        const j = await r.json();
-        return j.state || null;
-      } catch { return null; }
+    async fetchProfile() {
+      const { data, error } = await client.from("profiles").select("*").eq("id", userId).maybeSingle();
+      if (error) return null;
+      return data;
     },
-    async putState(payload) {
-      try {
-        const r = await fetch(`${API_BASE}/api/state`, {
-          method: "POST", headers: headers(), body: JSON.stringify(payload),
-        });
-        return r.ok;
-      } catch { return false; }
+    async updateProfile(patch) {
+      const { error } = await client.from("profiles").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", userId);
+      return !error;
     },
-    async registerInbox(address, tripId) {
-      try {
-        const r = await fetch(`${API_BASE}/api/trips/register`, {
-          method: "POST", headers: headers(),
-          body: JSON.stringify({ address, tripId }),
-        });
-        return r.ok;
-      } catch { return false; }
+    async fetchTrips() {
+      const { data, error } = await client.from("trips").select("*").eq("user_id", userId).order("created_at", { ascending: true });
+      if (error) return [];
+      return (data || []).map(rowToTrip);
+    },
+    async upsertTrip(trip) {
+      const row = tripToRow(trip, userId);
+      const { error } = await client.from("trips").upsert(row, { onConflict: "id" });
+      return !error;
+    },
+    async registerRoute(address, tripId) {
+      const { error } = await client.from("inbox_routes").upsert({
+        address: address.toLowerCase(), user_id: userId, trip_id: tripId,
+      }, { onConflict: "address" });
+      return !error;
     },
     async getItems(tripId) {
-      try {
-        const r = await fetch(`${API_BASE}/api/trips/${encodeURIComponent(tripId)}/items`, { headers: headers() });
-        if (!r.ok) return [];
-        const j = await r.json();
-        return Array.isArray(j.items) ? j.items : [];
-      } catch { return []; }
-    },
-    async pasteEmail({ tripId, from, subject, text }) {
-      const r = await fetch(`${API_BASE}/api/parse-and-store`, {
-        method: "POST", headers: headers(),
-        body: JSON.stringify({ tripId, from, subject, text }),
-      });
-      if (!r.ok) throw new Error((await r.json())?.error || `HTTP ${r.status}`);
-      return await r.json();
+      const { data, error } = await client.from("forwarded_items")
+        .select("*").eq("trip_id", tripId).order("when_at", { ascending: true });
+      if (error) return [];
+      return (data || []).map(rowToItem);
     },
     async deleteItem(tripId, itemId) {
-      try {
-        const r = await fetch(`${API_BASE}/api/trips/${encodeURIComponent(tripId)}/items/${encodeURIComponent(itemId)}`, {
-          method: "DELETE", headers: headers(),
-        });
-        return r.ok;
-      } catch { return false; }
+      const { error } = await client.from("forwarded_items").delete().eq("trip_id", tripId).eq("id", itemId);
+      return !error;
+    },
+    async fetchWants() {
+      const { data, error } = await client.from("user_wants").select("feature_id").eq("user_id", userId);
+      if (error) return [];
+      return (data || []).map(r => r.feature_id);
+    },
+    async toggleWant(featureId, on) {
+      if (on) {
+        await client.from("user_wants").upsert({ user_id: userId, feature_id: featureId });
+      } else {
+        await client.from("user_wants").delete().eq("user_id", userId).eq("feature_id", featureId);
+      }
     },
     async sendFeedback(note) {
-      try {
-        const r = await fetch(`${API_BASE}/api/feedback`, {
-          method: "POST", headers: headers(), body: JSON.stringify(note),
-        });
-        return r.ok;
-      } catch { return false; }
+      const { error } = await client.from("feedback_notes").insert({
+        user_id: userId,
+        working: note.working || "",
+        not_working: note.notWorking || "",
+        other: note.other || "",
+        wants: note.wants || [],
+      });
+      return !error;
+    },
+    async pasteEmail({ tripId, from, subject, text }) {
+      const { data, error } = await client.functions.invoke("parse-email", {
+        body: { tripId, from, subject, text },
+      });
+      if (error) throw new Error(error.message || "edge function failed");
+      return data;
     },
   };
 }
 
-// ─── Auth screen ─────────────────────────────────────────────
-function AuthScreen({ onAuth }) {
-  const [val, setVal] = useState("");
-  const [err, setErr] = useState("");
-  const submit = () => {
-    const v = val.trim().toLowerCase();
-    if (!KEY_RE.test(v)) {
-      setErr("That doesn't look right. Long, lowercase, hyphens are fine.");
-      return;
-    }
-    saveUserKey(v);
-    onAuth(v);
+// Row ↔ object mappers (Postgres uses snake_case + reserved words)
+function rowToTrip(row) {
+  return {
+    id: row.id,
+    where: row.where_text || "",
+    start: row.start_date || "",
+    end: row.end_date || "",
+    note: row.note || "",
+    companions: Array.isArray(row.companions) ? row.companions : [],
+    vibes: Array.isArray(row.vibes) ? row.vibes : [],
+    items: row.items || {},
+    address: row.address || "",
   };
-  return (
-    <div style={{ height: "100%", padding: "80px 30px 40px", display: "flex", flexDirection: "column", justifyContent: "space-between", background: `radial-gradient(ellipse at 50% 25%, #1A1815 0%, #0A0908 60%)`, animation: "fadeIn 0.6s ease both" }}>
-      <div style={{ display: "flex", justifyContent: "center", paddingTop: 36 }}>
-        <Mono s={38} />
-      </div>
-      <div style={{ textAlign: "center" }}>
-        <SC size={9} color={C.gold} style={{ display: "inline-block", marginBottom: 22 }}>The Ledger</SC>
-        <h1 style={{ fontFamily: F.display, fontSize: 36, fontWeight: 400, fontStyle: "italic", lineHeight: 1.1, color: C.cream, marginBottom: 18 }}>
-          The key, please.
-        </h1>
-        <p style={{ fontFamily: F.body, fontSize: 16, fontWeight: 300, lineHeight: 1.55, color: C.creamSoft, maxWidth: 290, margin: "0 auto 28px" }}>
-          A long string Lara sent you. Paste it once — this device will remember.
-        </p>
-        <input
-          value={val} onChange={e => { setVal(e.target.value); setErr(""); }}
-          onKeyDown={e => e.key === "Enter" && submit()}
-          placeholder="paste your key"
-          autoFocus
-          spellCheck={false}
-          autoCapitalize="none"
-          autoCorrect="off"
-          style={{
-            fontFamily: F.mono, fontSize: 16, color: C.cream,
-            padding: "10px 0 12px", borderBottom: `0.5px solid ${C.borderLight}`,
-            textAlign: "center", letterSpacing: 0.5,
-          }}
-        />
-        {err && <p style={{ fontFamily: F.body, fontSize: 13, color: C.blush, fontStyle: "italic", marginTop: 12 }}>{err}</p>}
-      </div>
-      <Btn full primary onClick={submit} disabled={!val.trim()}>Open</Btn>
-    </div>
-  );
+}
+function tripToRow(t, userId) {
+  return {
+    id: t.id,
+    user_id: userId,
+    where_text: t.where || "",
+    start_date: t.start || null,
+    end_date: t.end || null,
+    note: t.note || "",
+    companions: t.companions || [],
+    vibes: t.vibes || [],
+    items: t.items || {},
+    address: t.address || null,
+  };
+}
+function rowToItem(row) {
+  return {
+    id: row.id,
+    kind: row.kind || "other",
+    title: row.title || "",
+    when: row.when_at,
+    end: row.end_at,
+    where: row.where_text,
+    party: row.party,
+    details: row.details || "",
+    confidence: row.confidence,
+    raw_excerpt: row.raw_excerpt,
+    received_at: row.received_at,
+  };
 }
 
-// ─── Trip-id counter, kept in sync with persisted trips ──────
+// ─── Trip id counter ─────────────────────────────────────────
 let _tripCounter = 0;
 const nextTripId = () => `t${(++_tripCounter).toString().padStart(3, "0")}`;
 function syncCounter(trips) {
@@ -187,15 +169,97 @@ function buildAddress(name, where) {
 const EMPTY_TRIP = { where: "", start: "", end: "", note: "", companions: [], vibes: [] };
 const FIRST_RUN_STEPS = ["you", "trip", "companions", "forward"];
 const REPEAT_STEPS    = ["trip", "companions", "forward"];
-const DEFAULT_USER = { name: "Chloe", email: "chloe@example.com", city: "Hong Kong" };
-
-// Steps that should not be "resumable" on reload — they're snapshot-y
-// (ready) or auth-flow-y (welcome). Mid-flow form steps are resumable.
+const DEFAULT_USER = { name: "Chloe", email: "", city: "Hong Kong" };
 const RESUMABLE = new Set(["you", "trip", "companions", "forward", "home", "detail"]);
+
+// ─── AUTH SCREEN — magic link ────────────────────────────────
+function AuthScreen({ onSession }) {
+  const [email, setEmail] = useState("");
+  const [stage, setStage] = useState("enter"); // enter | sent | error
+  const [error, setError] = useState("");
+
+  const send = async () => {
+    if (!supabase) { setStage("error"); setError("Supabase not configured. See supabase-config.js."); return; }
+    const trimmed = email.trim().toLowerCase();
+    if (!/^\S+@\S+\.\S+$/.test(trimmed)) { setError("That doesn't look like an email."); return; }
+    setError("");
+    const { error } = await supabase.auth.signInWithOtp({
+      email: trimmed,
+      options: { emailRedirectTo: window.location.origin + window.location.pathname },
+    });
+    if (error) { setStage("error"); setError(error.message); return; }
+    setStage("sent");
+  };
+
+  return (
+    <div style={{ height: "100%", padding: "80px 30px 40px", display: "flex", flexDirection: "column", justifyContent: "space-between", background: `radial-gradient(ellipse at 50% 25%, #1A1815 0%, #0A0908 60%)`, animation: "fadeIn 0.6s ease both" }}>
+      <div style={{ display: "flex", justifyContent: "center", paddingTop: 36 }}>
+        <Mono s={38} />
+      </div>
+
+      {stage === "sent" ? (
+        <div style={{ textAlign: "center" }}>
+          <SC size={9} color={C.gold} style={{ display: "inline-block", marginBottom: 22 }}>Check your mail</SC>
+          <h1 style={{ fontFamily: F.display, fontSize: 32, fontWeight: 400, fontStyle: "italic", lineHeight: 1.12, color: C.cream, marginBottom: 18 }}>
+            A link is on its way to<br/>{email}.
+          </h1>
+          <p style={{ fontFamily: F.body, fontSize: 15, fontWeight: 300, lineHeight: 1.55, color: C.creamSoft, maxWidth: 290, margin: "0 auto" }}>
+            Tap it and you'll come back signed in. Same email, same device, same trips, anytime after.
+          </p>
+        </div>
+      ) : (
+        <div style={{ textAlign: "center" }}>
+          <SC size={9} color={C.gold} style={{ display: "inline-block", marginBottom: 22 }}>The Ledger</SC>
+          <h1 style={{ fontFamily: F.display, fontSize: 36, fontWeight: 400, fontStyle: "italic", lineHeight: 1.1, color: C.cream, marginBottom: 18 }}>
+            Your email.
+          </h1>
+          <p style={{ fontFamily: F.body, fontSize: 16, fontWeight: 300, lineHeight: 1.55, color: C.creamSoft, maxWidth: 290, margin: "0 auto 28px" }}>
+            We'll send a one-tap link. No password to remember.
+          </p>
+          <input
+            type="email" value={email}
+            onChange={e => { setEmail(e.target.value); setError(""); }}
+            onKeyDown={e => e.key === "Enter" && send()}
+            placeholder="you@example.com"
+            autoFocus spellCheck={false} autoCapitalize="none" autoCorrect="off"
+            style={{
+              fontFamily: F.body, fontSize: 20, fontStyle: "italic", color: C.cream,
+              padding: "10px 0 12px", borderBottom: `0.5px solid ${C.borderLight}`,
+              textAlign: "center", maxWidth: 300, margin: "0 auto", display: "block",
+            }}
+          />
+          {error && <p style={{ fontFamily: F.body, fontSize: 13, color: C.blush, fontStyle: "italic", marginTop: 12 }}>{error}</p>}
+        </div>
+      )}
+
+      {stage !== "sent" && <Btn full primary onClick={send} disabled={!email.trim()}>Send the link</Btn>}
+      {stage === "sent" && (
+        <button onClick={() => { setStage("enter"); }} style={{
+          background: "none", border: "none", color: C.stone, cursor: "pointer",
+          fontFamily: F.sans, fontSize: 10, letterSpacing: 2, textTransform: "uppercase",
+        }}>← use a different email</button>
+      )}
+    </div>
+  );
+}
 
 // ─── Root with auth gate ─────────────────────────────────────
 function Root() {
-  const [userKey, setUserKey] = useState(() => loadUserKey());
+  const [session, setSession] = useState(undefined); // undefined while loading
+
+  useEffect(() => {
+    if (!supabase) { setSession(null); return; }
+    supabase.auth.getSession().then(({ data }) => setSession(data.session || null));
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, sess) => setSession(sess || null));
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const signOut = useCallback(async () => {
+    if (supabase) await supabase.auth.signOut();
+    clearCache(); clearDraft();
+    setSession(null);
+  }, []);
+
   return (
     <div style={{
       height: "100%", width: "100%",
@@ -208,88 +272,91 @@ function Root() {
         background: C.bg, color: C.cream,
         boxShadow: "0 0 60px rgba(0,0,0,0.6)",
       }}>
-        {userKey
-          ? <App userKey={userKey} signOut={() => { clearUserKey(); clearLocal(); setUserKey(null); }} />
-          : <AuthScreen onAuth={setUserKey} />}
+        {session === undefined
+          ? <LoadingSplash />
+          : session
+            ? <App session={session} signOut={signOut} />
+            : <AuthScreen onSession={setSession} />}
       </div>
     </div>
   );
 }
 
-// ─── App ─────────────────────────────────────────────────────
-function App({ userKey, signOut }) {
-  const api = useMemo(() => makeApi(userKey), [userKey]);
-  // Expose for child components (TripDetail uses pasteEmail/deleteItem)
+function LoadingSplash() {
+  return (
+    <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", animation: "fadeIn 0.6s ease both" }}>
+      <Mono s={32} />
+      <p style={{ marginTop: 22, fontFamily: F.sans, fontSize: 10, color: C.stone, letterSpacing: 3, textTransform: "uppercase" }}>opening the ledger</p>
+    </div>
+  );
+}
+
+// ─── APP ─────────────────────────────────────────────────────
+function App({ session, signOut }) {
+  const userId = session?.user?.id;
+  const api = useMemo(() => makeApi(supabase, userId), [userId]);
+  // Expose so child components (TripDetail) can call pasteEmail/deleteItem
   useEffect(() => { window.LEDGER_API = api; }, [api]);
 
-  // Hydrate from localStorage synchronously — fast path
-  const initial = loadLocal();
-  const [user, setUser] = useState(initial?.user || DEFAULT_USER);
-  const [trips, setTrips] = useState(initial?.trips || []);
-  const [draft, setDraft] = useState(initial?.draft || EMPTY_TRIP);
-  const [wants, setWants] = useState(initial?.wants || []);
-  const [step, setStep] = useState(initial?.step && RESUMABLE.has(initial.step) ? initial.step : (initial?.trips?.length ? "home" : "welcome"));
-  const [firstRun, setFirstRun] = useState(initial ? (initial.firstRun ?? !initial.trips?.length) : true);
-  const [selectedTripId, setSelectedTripId] = useState(initial?.selectedTripId || null);
+  // Hydrate from cache for instant first paint, then refresh from Supabase
+  const cached = loadCache();
+  const [user, setUser] = useState(cached?.user || { ...DEFAULT_USER, email: session.user.email || "" });
+  const [trips, setTrips] = useState(cached?.trips || []);
+  const [wants, setWants] = useState(cached?.wants || []);
+  // Draft + step are device-local — restored from localStorage so a refresh
+  // mid-flow doesn't lose her input.
+  const draftCache = loadDraft();
+  const [draft, setDraft] = useState(draftCache?.draft || EMPTY_TRIP);
+  const [step, setStep] = useState(draftCache?.step && RESUMABLE.has(draftCache.step) ? draftCache.step : (cached?.trips?.length ? "home" : "welcome"));
+  const [firstRun, setFirstRun] = useState(draftCache?.firstRun ?? !cached?.trips?.length);
+  const [selectedTripId, setSelectedTripId] = useState(draftCache?.selectedTripId || null);
+
   syncCounter(trips);
 
-  // Pull from server once on mount. If server has newer state, replace
-  // local. If server has nothing, push our local state up.
+  // Refresh from server on mount
   const hydratedRef = useRef(false);
   useEffect(() => {
-    if (hydratedRef.current) return;
+    if (!api || hydratedRef.current) return;
     hydratedRef.current = true;
     (async () => {
-      const serverState = await api.fetchState();
-      if (!serverState) {
-        // First time on this user key — push local (or empty) up
-        api.putState({ user, trips, wants });
-        return;
+      const [profile, freshTrips, freshWants] = await Promise.all([
+        api.fetchProfile(), api.fetchTrips(), api.fetchWants(),
+      ]);
+      if (profile) {
+        const u = { name: profile.name || "Chloe", email: profile.email || session.user.email || "", city: profile.city || "Hong Kong" };
+        setUser(u);
       }
-      const local = loadLocal();
-      const localSavedAt = local?.savedAt || null;
-      const serverSavedAt = serverState.savedAt || null;
-      // Server wins when local has no save timestamp OR server is strictly newer
-      if (!localSavedAt || (serverSavedAt && serverSavedAt > localSavedAt)) {
-        const nextUser = serverState.user || DEFAULT_USER;
-        const nextTrips = Array.isArray(serverState.trips) ? serverState.trips : [];
-        const nextWants = Array.isArray(serverState.wants) ? serverState.wants : [];
-        setUser(nextUser); setTrips(nextTrips); setWants(nextWants);
-        syncCounter(nextTrips);
-        // If we hydrated a populated state and we were sitting on the auth-like
-        // welcome screen, jump to home.
-        if (nextTrips.length && step === "welcome") setStep("home");
-      }
+      setTrips(freshTrips);
+      syncCounter(freshTrips);
+      setWants(freshWants);
+      // If we now have trips and were stuck on welcome, head to home
+      if (freshTrips.length && step === "welcome") setStep("home");
     })();
-  }, []);
+  }, [api]);
 
-  // Persist locally on every state change (fast, synchronous-feeling)
-  useEffect(() => {
-    persistLocal({
-      user, trips, draft, wants, step, firstRun, selectedTripId,
-      savedAt: new Date().toISOString(),
-    });
-  }, [user, trips, draft, wants, step, firstRun, selectedTripId]);
+  // Cache locally on every change
+  useEffect(() => { saveCache({ user, trips, wants }); }, [user, trips, wants]);
+  useEffect(() => { saveDraft({ draft, step, firstRun, selectedTripId }); }, [draft, step, firstRun, selectedTripId]);
 
-  // Debounced server sync — wait for a quiet moment so we don't hammer
-  // KV on every keystroke. Only sync the persistent slice (not draft).
-  const syncTimerRef = useRef(null);
-  useEffect(() => {
-    if (!hydratedRef.current) return;
-    if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
-    syncTimerRef.current = setTimeout(() => {
-      api.putState({ user, trips, wants });
-    }, 800);
-    return () => { if (syncTimerRef.current) clearTimeout(syncTimerRef.current); };
-  }, [user, trips, wants, api]);
-
-  // ─── Form adapter — keeps existing flow components unchanged ──
+  // ─── Form adapter ──────────────────────────────────────────
   const data = { ...user, ...draft };
   const setData = (next) => {
     const { name, email, city, ...rest } = next;
-    setUser({ name, email, city });
+    const nextUser = { name, email, city };
+    setUser(nextUser);
     setDraft(rest);
   };
+
+  // Debounced profile update — push name/email/city to Supabase when they
+  // settle. Email comes from auth so we don't sync it back.
+  const profileTimer = useRef(null);
+  useEffect(() => {
+    if (!api) return;
+    if (profileTimer.current) clearTimeout(profileTimer.current);
+    profileTimer.current = setTimeout(() => {
+      api.updateProfile({ name: user.name, city: user.city });
+    }, 600);
+  }, [user.name, user.city, api]);
 
   const address = useMemo(
     () => buildAddress(user.name, draft.where || "trip"),
@@ -303,15 +370,18 @@ function App({ userKey, signOut }) {
   // ─── Transitions ─────────────────────────────────────────────
   const go = (target) => setStep(target);
 
-  const commitDraft = () => {
+  const commitDraft = async () => {
     const id = nextTripId();
     const trip = { ...draft, id, address };
     setTrips(prev => [...prev, trip]);
-    api.registerInbox(address, id);
+    if (api) {
+      await api.upsertTrip(trip);
+      await api.registerRoute(address, id);
+    }
     return trip;
   };
 
-  const handleForwardNext = () => { commitDraft(); setStep("ready"); };
+  const handleForwardNext = async () => { await commitDraft(); setStep("ready"); };
   const handleReadyNext = () => { setDraft(EMPTY_TRIP); setFirstRun(false); setStep("home"); };
   const startNewTrip = () => { setDraft(EMPTY_TRIP); setStep("trip"); };
   const openTrip = (tripId) => { setSelectedTripId(tripId); setStep("detail"); };
@@ -320,24 +390,27 @@ function App({ userKey, signOut }) {
     setTrips(prev => prev.map(t => {
       if (t.id !== tripId) return t;
       const items = { ...(t.items || {}), [itemId]: itemState };
-      return { ...t, items };
+      const next = { ...t, items };
+      if (api) api.upsertTrip(next);
+      return next;
     }));
   };
 
   const toggleWant = (id) => {
-    setWants(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+    setWants(prev => {
+      const has = prev.includes(id);
+      const next = has ? prev.filter(x => x !== id) : [...prev, id];
+      if (api) api.toggleWant(id, !has);
+      return next;
+    });
   };
 
   const reset = () => {
-    if (!window.confirm("Reset — clear all trips on this device? The server copy stays until you sync.")) return;
-    clearLocal();
+    if (!window.confirm("Clear local cache? Your data on the server stays — it'll re-hydrate next time.")) return;
+    clearCache(); clearDraft();
     _tripCounter = 0;
-    setTrips([]);
-    setDraft(EMPTY_TRIP);
-    setUser(DEFAULT_USER);
-    setWants([]);
-    setFirstRun(true);
-    setStep("welcome");
+    setTrips([]); setDraft(EMPTY_TRIP); setWants([]);
+    setFirstRun(true); setStep("welcome");
   };
 
   const lastTrip = trips[trips.length - 1] || draft;
