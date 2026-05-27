@@ -111,64 +111,85 @@ automatically once you link the repo.
 After deploy you've got a real URL. Share invites as
 `https://your-deploy-url/?k=<the-key>`.
 
-## Provisioning users (URL-as-credential)
+## Auth configuration (real users, real emails)
 
-Users never see a sign-in screen — Lara hands them a URL like
-`https://theledger.app/?k=chloe-7f3k9p` and they're in. No edge function,
-no CLI, no email step.
+The app uses Supabase magic-link auth. Each user signs in by typing
+their email — we send them a one-tap link, they click it, they're in.
+No password to remember. Sessions auto-refresh.
 
-### Add a person
+Three things to set in the Supabase dashboard:
 
-1. Decide on a key for them. Long, random-ish, lowercase + hyphens.
-   Examples: `chloe-7f3k9p3q9w`, `lara-test-2k88tt`, `taylor-x7m9p`.
-   The regex is `^[a-z0-9][a-z0-9-]{6,127}$`.
+1. **Authentication → Providers → Email**
+   - **"Allow new users to sign up"** → ON (anyone with a valid email
+     can join). If you want invite-only, leave it OFF and pre-create
+     each user via Authentication → Users → "Add user".
+   - **"Confirm email"** → ON (so the magic link is required; default).
 
-2. **Authentication → Users → "Add user → Create new user"**
-   - Email: `<key>@theledger.app` (e.g. `chloe-7f3k9p3q9w@theledger.app`)
-   - Password: same as the key (e.g. `chloe-7f3k9p3q9w`)
-   - **Tick "Auto Confirm User"** — critical, otherwise sign-in won't work
+2. **Authentication → URL Configuration**
+   - **Site URL** → your deploy URL (e.g. `https://chloeledger.vercel.app`)
+   - **Redirect URLs** → add a pattern for your deploy and for local
+     dev, e.g.
+     ```
+     https://chloeledger.vercel.app/**
+     http://localhost:3000/**
+     http://localhost:5173/**
+     ```
+   - Without this, Supabase rejects the magic-link redirect for
+     security and the user gets stuck on "site can't be reached".
 
-3. **Send the URL** out of band — Signal, iMessage, whatever:
+3. **(Optional) Custom SMTP** — Authentication → Emails → SMTP Settings.
+   By default Supabase sends magic links from `noreply@mail.supabase.io`
+   — fine for testing. For a branded "from" address, plug in Resend
+   (free 100/day), Postmark, or any SMTP provider. The default is
+   rate-limited to ~2/hour per email, so move to custom SMTP before
+   you have ~10 active testers.
 
-   ```
-   https://your-app-url/?k=chloe-7f3k9p3q9w
-   ```
+## Migrating off the URL-key flow
 
-That's it. They click; URL strips; they land on Welcome. Their session
-persists in localStorage; subsequent visits don't need the URL.
-
-### Revoke access
-
-Authentication → Users → click the user → "Delete user". Their session
-on any device fails on next refresh (within ~1 hour).
-
-Or to keep their data but cut access:
+If you tested with the URL-key + synthetic emails approach, those
+accounts have emails like `chloe-7f3k9p3q9w@theledger.app`. They still
+work as is — the user can sign in by entering that synthetic email —
+but it's cleaner to delete them and have real users sign in fresh.
 
 ```sql
-update auth.users set encrypted_password = null where email = 'chloe-7f3k9p3q9w@theledger.app';
+-- Delete a test account and all its data (cascades)
+delete from auth.users where email like '%@theledger.app';
 ```
+
+Or to keep a specific account but switch it to a real email:
+
+```sql
+update auth.users
+   set email = 'chloe@gmail.com', email_confirmed_at = now()
+ where email = 'chloe-7f3k9p3q9w@theledger.app';
+```
+
+## Managing users
+
+### Invite a specific person (signups off)
+
+If you've turned signup off, add them manually:
+**Authentication → Users → "Add user → Send invitation"** with their
+email. They get an invite link, click it, signed in.
 
 ### See who's signed in
 
-Authentication → Users shows `last_sign_in_at` for each. Or query:
+Authentication → Users shows `last_sign_in_at`. Or query:
 
 ```sql
-select email, last_sign_in_at from auth.users order by last_sign_in_at desc nulls last;
+select email, last_sign_in_at
+from auth.users
+order by last_sign_in_at desc nulls last;
 ```
 
-### A note on multi-device
+### Revoke a user
 
-Same key works on as many devices as the person opens the URL on. Each
-device gets its own session (stored in its own localStorage) but they
-all point at the same account and see the same trips.
+Authentication → Users → click → "Delete user" cascades and removes
+all their data. Or to ban but keep their data:
 
-### A note on "multiple keys per user"
-
-This simpler setup is one-key-per-user (since the key is the password).
-If you need multiple keys for the same person (e.g. a recoverable
-"backup" link), you'd add the `keys` table + `exchange-key` edge
-function back — the migration and function code are still in this repo
-but unused by default.
+```sql
+update auth.users set banned_until = '2099-01-01' where email = '...';
+```
 
 ## Local development
 

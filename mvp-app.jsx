@@ -172,71 +172,90 @@ const REPEAT_STEPS    = ["trip", "companions", "forward"];
 const DEFAULT_USER = { name: "Chloe", email: "", city: "Hong Kong" };
 const RESUMABLE = new Set(["you", "trip", "companions", "forward", "home", "detail"]);
 
-// ─── Auth via opaque URL key ─────────────────────────────────
-// Lara hands out a URL like /?k=chloe-7f3k9p. The client extracts the
-// key, stashes it locally, strips it from the URL, and signs in to
-// Supabase with the key as the password (against a synthetic email
-// derived from the key). The user never sees the key.
+// ─── Auth via email magic link ───────────────────────────────
+// Supabase Auth handles everything. User enters an email, gets a
+// one-tap link, clicks it, returns signed-in. Session persists in
+// localStorage and auto-refreshes; subsequent visits skip the screen.
 //
-// No edge function involved — Supabase Auth's signInWithPassword handles
-// everything. Lara provisions each user via the Auth dashboard:
-//   email:    <key>@theledger.app
-//   password: <key>
-//   auto-confirm: yes
-//
-// To prevent random visitors from creating accounts, disable signup in
-// Supabase: Authentication → Sign In / Up → Email → toggle off "Allow
-// new users to sign up".
-const KEY_RE = /^[a-z0-9][a-z0-9-]{6,127}$/i;
-const KEY_STORE = "ledger.urlkey";
-const KEY_EMAIL_DOMAIN = window.LEDGER_KEY_DOMAIN || "theledger.app";
+// Supabase configuration required:
+//   - Authentication → Providers → Email → "Allow new users to sign up" ON
+//   - Authentication → URL Configuration → Site URL = your deploy URL
+//   - Authentication → URL Configuration → Redirect URLs include your
+//     deploy URL (e.g. https://chloeledger.vercel.app/**) and any local
+//     dev URL (http://localhost:3000/**)
 
-function readKeyFromURL() {
-  const k = new URLSearchParams(window.location.search).get("k");
-  return k && KEY_RE.test(k) ? k.toLowerCase() : null;
-}
-function stripKeyFromURL() {
-  try { window.history.replaceState({}, "", window.location.pathname); } catch {}
-}
-function persistKey(k) { try { localStorage.setItem(KEY_STORE, k); } catch {} }
-function loadStoredKey() {
-  try { return localStorage.getItem(KEY_STORE); } catch { return null; }
-}
-function clearStoredKey() { try { localStorage.removeItem(KEY_STORE); } catch {} }
+function AuthScreen() {
+  const [email, setEmail] = useState("");
+  const [status, setStatus] = useState("idle"); // idle | sending | sent | error
+  const [error, setError] = useState("");
 
-async function exchangeKey(key) {
-  if (!key || !supabase) return { error: "not configured" };
-  const email = `${key}@${KEY_EMAIL_DOMAIN}`;
-  const { error } = await supabase.auth.signInWithPassword({ email, password: key });
-  if (error) {
-    // Normalise the common bad-key errors so NoAccess can show clear copy
-    const msg = (error.message || "").toLowerCase();
-    if (msg.includes("invalid") || msg.includes("not confirmed")) return { error: "unknown key" };
-    return { error: error.message };
+  const send = async () => {
+    const trimmed = email.trim().toLowerCase();
+    if (!/^\S+@\S+\.\S+$/.test(trimmed)) {
+      setError("That doesn't look like an email."); return;
+    }
+    setStatus("sending"); setError("");
+    const { error: otpErr } = await supabase.auth.signInWithOtp({
+      email: trimmed,
+      options: { emailRedirectTo: window.location.origin + window.location.pathname },
+    });
+    if (otpErr) { setStatus("error"); setError(otpErr.message); return; }
+    setStatus("sent");
+  };
+
+  if (status === "sent") {
+    return (
+      <div style={{ height: "100%", padding: "80px 30px 40px", display: "flex", flexDirection: "column", justifyContent: "space-between", background: `radial-gradient(ellipse at 50% 25%, #1A1815 0%, #0A0908 60%)`, animation: "fadeIn 0.6s ease both" }}>
+        <div style={{ display: "flex", justifyContent: "center", paddingTop: 36 }}>
+          <Mono s={38} />
+        </div>
+        <div style={{ textAlign: "center" }}>
+          <SC color={C.gold} size={9} style={{ display: "inline-block", marginBottom: 22 }}>Check your inbox</SC>
+          <h1 style={{ fontFamily: F.display, fontSize: 30, fontWeight: 400, fontStyle: "italic", lineHeight: 1.15, color: C.cream, marginBottom: 18 }}>
+            A link is on its way<br/>to {email}.
+          </h1>
+          <p style={{ fontFamily: F.body, fontSize: 15, fontWeight: 300, lineHeight: 1.55, color: C.creamSoft, maxWidth: 290, margin: "0 auto" }}>
+            Tap it from any device — phone, laptop, anywhere. You'll come back signed in.
+          </p>
+        </div>
+        <button onClick={() => { setStatus("idle"); setEmail(""); }} style={{
+          background: "none", border: "none", color: C.stone, cursor: "pointer",
+          fontFamily: F.sans, fontSize: 10, letterSpacing: 2, textTransform: "uppercase",
+        }}>← use a different email</button>
+      </div>
+    );
   }
-  return { ok: true };
-}
 
-// ─── NoAccess screen — shown when there's no valid key + no session ─
-function NoAccess({ error, hadKey }) {
   return (
-    <div style={{ height: "100%", padding: "80px 30px 40px", display: "flex", flexDirection: "column", justifyContent: "space-between", textAlign: "center", background: `radial-gradient(ellipse at 50% 25%, #1A1815 0%, #0A0908 60%)`, animation: "fadeIn 0.6s ease both" }}>
+    <div style={{ height: "100%", padding: "80px 30px 40px", display: "flex", flexDirection: "column", justifyContent: "space-between", background: `radial-gradient(ellipse at 50% 25%, #1A1815 0%, #0A0908 60%)`, animation: "fadeIn 0.6s ease both" }}>
       <div style={{ display: "flex", justifyContent: "center", paddingTop: 36 }}>
         <Mono s={38} />
       </div>
-      <div>
+      <div style={{ textAlign: "center" }}>
         <SC color={C.gold} size={9} style={{ display: "inline-block", marginBottom: 22 }}>The Ledger</SC>
-        <h1 style={{ fontFamily: F.display, fontSize: 32, fontWeight: 400, fontStyle: "italic", lineHeight: 1.12, color: C.cream, marginBottom: 18 }}>
-          {hadKey ? "We don't recognise that link." : "By invitation only."}
+        <h1 style={{ fontFamily: F.display, fontSize: 36, fontWeight: 400, fontStyle: "italic", lineHeight: 1.1, color: C.cream, marginBottom: 18 }}>
+          Your email.
         </h1>
-        <p style={{ fontFamily: F.body, fontSize: 16, fontWeight: 300, lineHeight: 1.55, color: C.creamSoft, maxWidth: 290, margin: "0 auto" }}>
-          {hadKey
-            ? "It may have been revoked, replaced, or copied wrong. Ask Lara for the current link."
-            : "Ask Lara for your link — open it and you're in."}
+        <p style={{ fontFamily: F.body, fontSize: 16, fontWeight: 300, lineHeight: 1.55, color: C.creamSoft, maxWidth: 290, margin: "0 auto 28px" }}>
+          We'll send a one-tap link. No password to remember.
         </p>
-        {error && <p style={{ fontFamily: F.mono, fontSize: 10.5, color: C.stoneSoft, marginTop: 24, letterSpacing: 0.4 }}>{error}</p>}
+        <input
+          type="email" value={email}
+          onChange={e => { setEmail(e.target.value); setError(""); }}
+          onKeyDown={e => e.key === "Enter" && send()}
+          placeholder="you@example.com"
+          autoFocus spellCheck={false} autoCapitalize="none" autoCorrect="off"
+          style={{
+            fontFamily: F.body, fontSize: 20, fontStyle: "italic", color: C.cream,
+            padding: "10px 0 12px", borderBottom: `0.5px solid ${C.borderLight}`,
+            textAlign: "center", maxWidth: 300, margin: "0 auto", display: "block",
+          }}
+        />
+        {error && <p style={{ fontFamily: F.body, fontSize: 13, color: C.blush, fontStyle: "italic", marginTop: 12 }}>{error}</p>}
       </div>
-      <div />
+      <Btn full primary onClick={send} disabled={status === "sending" || !email.trim()}>
+        {status === "sending" ? "Sending…" : "Send the link"}
+      </Btn>
     </div>
   );
 }
@@ -244,61 +263,25 @@ function NoAccess({ error, hadKey }) {
 // ─── Root with auth gate ─────────────────────────────────────
 function Root() {
   const [session, setSession] = useState(undefined); // undefined while loading
-  const [exchangeError, setExchangeError] = useState("");
-  const [hadKeyOnLoad, setHadKeyOnLoad] = useState(false);
-
-  // Capture key from URL once on mount; persist + strip it
-  const initialKey = useMemo(() => {
-    const fromURL = readKeyFromURL();
-    if (fromURL) {
-      persistKey(fromURL);
-      stripKeyFromURL();
-      setHadKeyOnLoad(true);
-      return fromURL;
-    }
-    const stored = loadStoredKey();
-    if (stored) { setHadKeyOnLoad(true); return stored; }
-    return null;
-  }, []);
 
   useEffect(() => {
     if (!supabase) { setSession(null); return; }
-
     let cancelled = false;
-    (async () => {
-      // Existing session? Use it.
-      const { data: existing } = await supabase.auth.getSession();
-      if (cancelled) return;
-      if (existing.session) { setSession(existing.session); return; }
 
-      // No session — try to exchange the stored key
-      if (initialKey) {
-        const result = await exchangeKey(initialKey);
-        if (cancelled) return;
-        if (result.ok) {
-          // onAuthStateChange will set the session
-          return;
-        }
-        setExchangeError(result.error || "");
-        // If the key was bad, clear it so they're not stuck retrying
-        if (result.error === "unknown key" || result.error === "invalid key format") {
-          clearStoredKey();
-        }
-        setSession(null);
-      } else {
-        setSession(null);
-      }
-    })();
+    // Auto-extracts #access_token from a returning magic-link URL via
+    // detectSessionInUrl in the client config.
+    supabase.auth.getSession().then(({ data }) => {
+      if (!cancelled) setSession(data.session || null);
+    });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, sess) => {
       if (!cancelled) setSession(sess || null);
     });
     return () => { cancelled = true; subscription.unsubscribe(); };
-  }, [initialKey]);
+  }, []);
 
   const signOut = useCallback(async () => {
     if (supabase) await supabase.auth.signOut();
-    clearStoredKey();
     clearCache(); clearDraft();
     setSession(null);
   }, []);
@@ -319,7 +302,7 @@ function Root() {
           ? <LoadingSplash />
           : session
             ? <App session={session} signOut={signOut} />
-            : <NoAccess error={exchangeError} hadKey={hadKeyOnLoad} />}
+            : <AuthScreen />}
       </div>
     </div>
   );
