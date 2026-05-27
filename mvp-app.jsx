@@ -172,53 +172,129 @@ const REPEAT_STEPS    = ["trip", "companions", "forward"];
 const DEFAULT_USER = { name: "Chloe", email: "", city: "Hong Kong" };
 const RESUMABLE = new Set(["you", "trip", "companions", "forward", "home", "detail"]);
 
-// ─── Auth via email magic link ───────────────────────────────
-// Supabase Auth handles everything. User enters an email, gets a
-// one-tap link, clicks it, returns signed-in. Session persists in
-// localStorage and auto-refreshes; subsequent visits skip the screen.
+// ─── Auth via email magic link + 6-digit code ────────────────
+// Supabase sends BOTH a link and a 6-digit code in every "magic link"
+// email. We surface both so we're robust against the common failure:
+// email clients (WhatsApp, iOS Mail, etc.) often pre-fetch URLs for
+// link previews, which consumes the one-shot token before the user
+// can click it. The code is unaffected by pre-fetching.
 //
 // Supabase configuration required:
 //   - Authentication → Providers → Email → "Allow new users to sign up" ON
 //   - Authentication → URL Configuration → Site URL = your deploy URL
-//   - Authentication → URL Configuration → Redirect URLs include your
-//     deploy URL (e.g. https://chloeledger.vercel.app/**) and any local
-//     dev URL (http://localhost:3000/**)
+//     (must include https://)
+//   - Authentication → URL Configuration → Redirect URLs include
+//     https://your-deploy/** and any local dev URL.
+
+// Pull any error Supabase put in the URL hash on a failed redirect
+// (e.g. expired/already-used link). Returns a human message + strips
+// the hash so we don't keep showing the same error.
+function consumeURLAuthError() {
+  if (typeof window === "undefined") return null;
+  const hash = window.location.hash || "";
+  if (!hash.includes("error")) return null;
+  const params = new URLSearchParams(hash.replace(/^#/, ""));
+  const code = params.get("error_code") || params.get("error");
+  const desc = params.get("error_description")?.replace(/\+/g, " ") || "";
+  let msg;
+  if (code === "otp_expired") {
+    msg = "That link was already used or has expired. Request a new one — the 6-digit code in the email also works.";
+  } else if (desc) {
+    msg = desc;
+  } else if (code) {
+    msg = code;
+  } else {
+    msg = "Sign-in failed. Try again.";
+  }
+  try { window.history.replaceState({}, "", window.location.pathname); } catch {}
+  return msg;
+}
 
 function AuthScreen() {
   const [email, setEmail] = useState("");
-  const [status, setStatus] = useState("idle"); // idle | sending | sent | error
-  const [error, setError] = useState("");
+  const [code, setCode] = useState("");
+  const [stage, setStage] = useState("enter"); // enter | sent | verifying
+  const [error, setError] = useState(() => consumeURLAuthError() || "");
 
   const send = async () => {
     const trimmed = email.trim().toLowerCase();
     if (!/^\S+@\S+\.\S+$/.test(trimmed)) {
       setError("That doesn't look like an email."); return;
     }
-    setStatus("sending"); setError("");
+    setStage("verifying"); setError("");
     const { error: otpErr } = await supabase.auth.signInWithOtp({
       email: trimmed,
       options: { emailRedirectTo: window.location.origin + window.location.pathname },
     });
-    if (otpErr) { setStatus("error"); setError(otpErr.message); return; }
-    setStatus("sent");
+    if (otpErr) { setStage("enter"); setError(otpErr.message); return; }
+    setStage("sent"); setCode("");
   };
 
-  if (status === "sent") {
-    return (
-      <div style={{ height: "100%", padding: "80px 30px 40px", display: "flex", flexDirection: "column", justifyContent: "space-between", background: `radial-gradient(ellipse at 50% 25%, #1A1815 0%, #0A0908 60%)`, animation: "fadeIn 0.6s ease both" }}>
-        <div style={{ display: "flex", justifyContent: "center", paddingTop: 36 }}>
-          <Mono s={38} />
+  const verify = async () => {
+    if (code.length < 6) return;
+    setStage("verifying"); setError("");
+    const { error: otpErr } = await supabase.auth.verifyOtp({
+      type: "email",
+      email: email.trim().toLowerCase(),
+      token: code.trim(),
+    });
+    if (otpErr) {
+      setStage("sent");
+      setError(otpErr.message || "That code didn't work — check the latest email.");
+      return;
+    }
+    // Success — onAuthStateChange in Root flips the session and renders App
+  };
+
+  const reset = () => { setStage("enter"); setCode(""); setError(""); };
+
+  // Common shell — monogram top, error banner if any, body in the middle
+  const shell = (body, footer) => (
+    <div style={{ height: "100%", padding: "80px 30px 40px", display: "flex", flexDirection: "column", justifyContent: "space-between", background: `radial-gradient(ellipse at 50% 25%, #1A1815 0%, #0A0908 60%)`, animation: "fadeIn 0.6s ease both" }}>
+      <div style={{ display: "flex", justifyContent: "center", paddingTop: 36 }}>
+        <Mono s={38} />
+      </div>
+      {error && (
+        <div style={{ padding: "10px 14px", border: `0.5px solid ${C.blush}55`, background: `${C.blush}10`, marginTop: 20 }}>
+          <p style={{ fontFamily: F.body, fontSize: 13, color: C.blush, fontStyle: "italic", lineHeight: 1.5, textAlign: "center" }}>{error}</p>
         </div>
-        <div style={{ textAlign: "center" }}>
-          <SC color={C.gold} size={9} style={{ display: "inline-block", marginBottom: 22 }}>Check your inbox</SC>
-          <h1 style={{ fontFamily: F.display, fontSize: 30, fontWeight: 400, fontStyle: "italic", lineHeight: 1.15, color: C.cream, marginBottom: 18 }}>
-            A link is on its way<br/>to {email}.
-          </h1>
-          <p style={{ fontFamily: F.body, fontSize: 15, fontWeight: 300, lineHeight: 1.55, color: C.creamSoft, maxWidth: 290, margin: "0 auto" }}>
-            Tap it from any device — phone, laptop, anywhere. You'll come back signed in.
-          </p>
-        </div>
-        <button onClick={() => { setStatus("idle"); setEmail(""); }} style={{
+      )}
+      {body}
+      {footer}
+    </div>
+  );
+
+  if (stage === "sent" || stage === "verifying") {
+    return shell(
+      <div style={{ textAlign: "center" }}>
+        <SC color={C.gold} size={9} style={{ display: "inline-block", marginBottom: 22 }}>Check your inbox</SC>
+        <h1 style={{ fontFamily: F.display, fontSize: 28, fontWeight: 400, fontStyle: "italic", lineHeight: 1.15, color: C.cream, marginBottom: 16 }}>
+          Enter the 6-digit<br/>code from your email.
+        </h1>
+        <p style={{ fontFamily: F.body, fontSize: 14, fontWeight: 300, lineHeight: 1.5, color: C.creamSoft, maxWidth: 290, margin: "0 auto 22px" }}>
+          We sent it to <span style={{ color: C.cream }}>{email}</span>. Tap the link in the email or paste the code here — either works.
+        </p>
+        <input
+          type="text" inputMode="numeric" autoComplete="one-time-code"
+          maxLength={6} value={code}
+          onChange={e => { setCode(e.target.value.replace(/\D/g, "")); setError(""); }}
+          onKeyDown={e => e.key === "Enter" && verify()}
+          placeholder="000000"
+          autoFocus
+          style={{
+            fontFamily: F.mono, fontSize: 28, color: C.cream,
+            padding: "10px 0 12px", borderBottom: `0.5px solid ${C.borderLight}`,
+            textAlign: "center", letterSpacing: 8, maxWidth: 220,
+            margin: "0 auto", display: "block",
+          }}
+        />
+      </div>,
+      <div>
+        <Btn full primary onClick={verify} disabled={stage === "verifying" || code.length < 6}>
+          {stage === "verifying" ? "Signing in…" : "Continue"}
+        </Btn>
+        <button onClick={reset} style={{
+          marginTop: 14, width: "100%",
           background: "none", border: "none", color: C.stone, cursor: "pointer",
           fontFamily: F.sans, fontSize: 10, letterSpacing: 2, textTransform: "uppercase",
         }}>← use a different email</button>
@@ -226,37 +302,31 @@ function AuthScreen() {
     );
   }
 
-  return (
-    <div style={{ height: "100%", padding: "80px 30px 40px", display: "flex", flexDirection: "column", justifyContent: "space-between", background: `radial-gradient(ellipse at 50% 25%, #1A1815 0%, #0A0908 60%)`, animation: "fadeIn 0.6s ease both" }}>
-      <div style={{ display: "flex", justifyContent: "center", paddingTop: 36 }}>
-        <Mono s={38} />
-      </div>
-      <div style={{ textAlign: "center" }}>
-        <SC color={C.gold} size={9} style={{ display: "inline-block", marginBottom: 22 }}>The Ledger</SC>
-        <h1 style={{ fontFamily: F.display, fontSize: 36, fontWeight: 400, fontStyle: "italic", lineHeight: 1.1, color: C.cream, marginBottom: 18 }}>
-          Your email.
-        </h1>
-        <p style={{ fontFamily: F.body, fontSize: 16, fontWeight: 300, lineHeight: 1.55, color: C.creamSoft, maxWidth: 290, margin: "0 auto 28px" }}>
-          We'll send a one-tap link. No password to remember.
-        </p>
-        <input
-          type="email" value={email}
-          onChange={e => { setEmail(e.target.value); setError(""); }}
-          onKeyDown={e => e.key === "Enter" && send()}
-          placeholder="you@example.com"
-          autoFocus spellCheck={false} autoCapitalize="none" autoCorrect="off"
-          style={{
-            fontFamily: F.body, fontSize: 20, fontStyle: "italic", color: C.cream,
-            padding: "10px 0 12px", borderBottom: `0.5px solid ${C.borderLight}`,
-            textAlign: "center", maxWidth: 300, margin: "0 auto", display: "block",
-          }}
-        />
-        {error && <p style={{ fontFamily: F.body, fontSize: 13, color: C.blush, fontStyle: "italic", marginTop: 12 }}>{error}</p>}
-      </div>
-      <Btn full primary onClick={send} disabled={status === "sending" || !email.trim()}>
-        {status === "sending" ? "Sending…" : "Send the link"}
-      </Btn>
-    </div>
+  return shell(
+    <div style={{ textAlign: "center" }}>
+      <SC color={C.gold} size={9} style={{ display: "inline-block", marginBottom: 22 }}>The Ledger</SC>
+      <h1 style={{ fontFamily: F.display, fontSize: 36, fontWeight: 400, fontStyle: "italic", lineHeight: 1.1, color: C.cream, marginBottom: 18 }}>
+        Your email.
+      </h1>
+      <p style={{ fontFamily: F.body, fontSize: 16, fontWeight: 300, lineHeight: 1.55, color: C.creamSoft, maxWidth: 290, margin: "0 auto 28px" }}>
+        We'll send a 6-digit code and a one-tap link. Either gets you in.
+      </p>
+      <input
+        type="email" value={email}
+        onChange={e => { setEmail(e.target.value); setError(""); }}
+        onKeyDown={e => e.key === "Enter" && send()}
+        placeholder="you@example.com"
+        autoFocus spellCheck={false} autoCapitalize="none" autoCorrect="off"
+        style={{
+          fontFamily: F.body, fontSize: 20, fontStyle: "italic", color: C.cream,
+          padding: "10px 0 12px", borderBottom: `0.5px solid ${C.borderLight}`,
+          textAlign: "center", maxWidth: 300, margin: "0 auto", display: "block",
+        }}
+      />
+    </div>,
+    <Btn full primary onClick={send} disabled={!email.trim()}>
+      Send the code
+    </Btn>
   );
 }
 
